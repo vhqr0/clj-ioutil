@@ -1,213 +1,276 @@
 (ns ioutil.bytes
-  (:refer-clojure :exclude [concat compare read read-line flush])
-  (:require [clojure.edn :as edn]
-            [ioutil.array :as array]))
+  (:refer-clojure :exclude [bytes? bytes rand-int concat compare read read-line])
+  (:require [ioutil.bytes.impl :as impl]
+            [promesa.core :as p]
+            [promesa.exec.csp :as csp]))
 
-(def make-bytes byte-array)
-(def blength alength)
-(def bget aget)
+;;; impl
 
-(def rand-bytes array/rand-byte-array)
-(def bytes->str array/byte-array->str)
-(def str->bytes array/str->byte-array)
+(def make-bytes impl/make-bytes)
+(def bytes? impl/bytes?)
+(def btype impl/btype)
+(def bcast impl/bcast)
+(def blength impl/blength)
+(def bempty? impl/bempty?)
+(def bget impl/bget)
+(def bseq impl/bseq)
+(def brseq impl/brseq)
+(def bget-unsigned impl/bget-unsigned)
+(def bseq-unsigned impl/bseq-unsigned)
+(def brseq-unsigned impl/brseq-unsigned)
+(def sub impl/sub)
+(def concat impl/concat)
+(def equals? impl/equals?)
+(def compare impl/compare)
+(def index-of impl/index-of)
+(def last-index-of impl/last-index-of)
+(def rand-bytes impl/rand-bytes)
+(def rand-int impl/rand-int)
+(def rand-float impl/rand-float)
+(def rand-uuid impl/rand-uuid)
+(def bytes->str impl/bytes->str)
+(def str->bytes impl/str->bytes)
+(def str->int impl/str->int)
+(def str->float impl/str->float)
+(def str->uuid impl/str->uuid)
+(def bytes->hex impl/bytes->hex)
+(def hex->bytes impl/hex->bytes)
+(def bytes->base64 impl/bytes->base64)
+(def base64->bytes impl/base64->bytes)
+(def bytes->int impl/bytes->int)
+(def int->bytes impl/int->bytes)
+(def bytes->float impl/bytes->float)
+(def float->bytes impl/float->bytes)
+(def bytes->uuid impl/bytes->uuid)
+(def uuid->bytes impl/uuid->bytes)
+(def int->bits impl/int->bits)
+(def bits->int impl/bits->int)
+(def bytes->bits impl/bytes->bits)
+(def bits->bytes impl/bits->bytes)
 
-(def sub array/sub)
-(def concat array/concat)
-(def compare array/compare)
-(def index-of array/index-of)
-(def last-index-of array/last-index-of)
+;;; protocols
 
-;;; errors
+(defprotocol IDetachable
+  (-detach [this]
+    "Detach low level resource from reader/writer."))
+
+(defprotocol ICloseable
+  (-close [this]
+    "Close all related resources of reader/writer/stream."))
+
+(defprotocol IBytesReader
+  (-peek [this]
+    "Peek buffer of reader, return (data, pos).")
+  (-seek [this pos]
+    "Reset pos of buffer, return new reader.")
+  (-peek-more [this]
+    "Peek more bytes than last peek from reader, return p/let-able
+    new reader, and (data, pos) or nil if no more bytes to peek."))
+
+(defprotocol IBytesWriter
+  (-write [this b]
+    "Write bytes to buffer, return p/let-able new writer.")
+  (-flush [this]
+    "Flush buffered bytes, return p/let-able new writer."))
+
+;;; utils
 
 (defn want-read-error []
-  (ex-info "bytes want read error" {:type ::want-read}))
+  (ex-info "want read error" {:type ::want-read}))
 
 (defn want-write-error []
-  (ex-info "bytes want write error" {:type ::want-write}))
+  (ex-info "want write error" {:type ::want-write}))
 
-(defn want-read-error? [e]
-  (= (:type (ex-data e)) ::want-read))
+(defn detach [detachable]
+  (-detach detachable))
 
-(defn want-write-error? [e]
-  (= (:type (ex-data e)) ::want-write))
+(defn close [closeable]
+  (-close closeable))
 
-;;; seq
+(def ^:dynamic *peek-threshold* 65536)
 
-(defn bytes->seq [b]
-  (->> (range (blength b)) (map #(bget b %))))
-
-;;; hex
-
-(def ^:private nibble->hex {0x0 \0 0x1 \1 0x2 \2 0x3 \3 0x4 \4
-                            0x5 \5 0x6 \6 0x7 \7 0x8 \8 0x9 \9
-                            0xa \a 0xb \b 0xc \c 0xd \d 0xe \e 0xf \f})
-
-(def ^:private hex->nibble {\0 0x0 \1 0x1 \2 0x2 \3 0x3 \4 0x4
-                            \5 0x5 \6 0x6 \7 0x7 \8 0x8 \9 0x9
-                            \a 0xa \b 0xb \c 0xc \d 0xd \e 0xe \f 0xf
-                            \A 0xa \B 0xb \C 0xc \D 0xd \E 0xe \F 0xf})
-
-(defn- byte->nibble [i]
-  [(bit-shift-right (bit-and i 0xf0) 4) (bit-and i 0xf)])
-
-(defn- nibble->byte [l r]
-  {:pre [(int? l) (int? r)]}
-  (+ (bit-shift-left l 4) r))
-
-(defn byte->hex [i]
-  (let [[l r] (byte->nibble i)]
-    (str (nibble->hex l) (nibble->hex r))))
-
-(defn hex->byte
-  ([h] (let [[l r] (seq h)] (hex->byte l r)))
-  ([l r] (nibble->byte (hex->nibble l) (hex->nibble r))))
-
-(defn bytes->hex [b]
-  (->> (bytes->seq b)
-       (map byte->hex)
-       (apply str)))
-
-(defn hex->bytes [h]
-  (->> (partition-all 2 h)
-       (map hex->byte)
-       make-bytes))
-
-;;; int
-
-(defn seq->int [s]
-  (reduce #(+ (bit-shift-left %1 8) (bit-and %2 0xff)) 0 s))
-
-(defn int->seq [i]
-  (lazy-seq (cons (bit-and i 0xff) (int->seq (bit-shift-right i 8)))))
-
-(defn bytes->int
-  ([b] (bytes->int b :big))
-  ([b order] (seq->int
-              (condp = order
-                :big    (bytes->seq b)
-                :little (reverse (bytes->seq b))))))
-
-(defn int->bytes
-  ([i n] (int->bytes i n :big))
-  ([i n order]
-   (let [s (take n (int->seq i))]
-     (condp = order
-       :big    (make-bytes (reverse s))
-       :little (make-bytes s)))))
-
-(defn str->int [s]
-  {:post [(int? %)]}
-  (if (empty? s)
-    0
-    (edn/read-string s)))
-
-(defn hex->int [h]
-  {:post [(int? %)]}
-  (if (empty? h)
-    0
-    (edn/read-string (str "0x" h))))
-
-;;; sint
-
-(defn int->sint [i n]
-  (let [m (bit-shift-left 1 (dec (bit-shift-left n 3)))]
-    (if (< i m)
-      i
-      (- i (bit-shift-left m 1)))))
-
-(defn sint->int [i n]
-  (if (>= i 0)
-    i
-    (+ i (bit-shift-left 1 (bit-shift-left n 3)))))
-
-(defn bytes->sint
-  ([b] (bytes->sint b :big))
-  ([b order] (-> (bytes->int b order) (int->sint (blength b)))))
-
-(defn sint->bytes
-  ([i n] (sint->bytes i n :big))
-  ([i n order] (-> (sint->int i n) (int->bytes n order))))
-
-;;; bits
-
-(defn bits-lens->offsets [lens]
-  (->> (reverse lens) (reductions + 0) butlast reverse vec))
-
-(defn bits-lens->masks [lens]
-  (mapv #(dec (bit-shift-left % 1)) lens))
-
-(defn bits-lens->bytes-lens [lens]
-  (let [n (reduce + lens)]
-    (assert (zero? (mod n 8)))
-    (bit-shift-right n 3)))
-
-(defn int->bits [i offsets masks]
-  (mapv #(bit-and (bit-shift-right i %1) %2) offsets masks))
-
-(defn bits->int [bits offsets]
-  (reduce + (map bit-shift-left bits offsets)))
-
-(defn bytes->bits
-  ([b offsets masks] (bytes->bits b offsets masks :big))
-  ([b offsets masks order] (-> (bytes->int b order) (int->bits offsets masks))))
-
-(defn bits->bytes
-  ([bits offsets n] (bits->bytes offsets bits n :big))
-  ([bits offsets n order] (-> (bits->int bits offsets) (int->bytes n order))))
-
-;;; reader
-
-(defrecord reader [data pos])
-
-(defn make-reader [data]
-  (->reader data 0))
+(defn peek-until
+  ([reader pred] (peek-until reader pred *peek-threshold*))
+  ([reader pred threshold]
+   (p/loop [r [reader (-peek reader)]]
+     (let [[reader r] r]
+       (if r
+         (let [[data pos] r]
+           (if-let [r (pred data pos)]
+             [reader r]
+             (p/recur
+              (if (< (- (blength data) pos) threshold)
+                (-peek-more reader)
+                (p/rejected (want-write-error))))))
+         (p/rejected (want-read-error)))))))
 
 (defn read
-  ([{:keys [data pos]}]
-   [(->reader data (blength data)) (sub data pos)])
-  ([{:keys [data pos]} n]
-   (let [npos (+ pos n)]
-     (if (>= (blength data) npos)
-       [(->reader data npos) (sub data pos npos)]
-       (throw (want-read-error))))))
+  ([reader]
+   (let [[data pos] (-peek reader)]
+     (if (< pos (blength data))
+       [(-seek reader (blength data)) (sub data pos)]
+       (p/let [[reader r] (-peek-more reader)]
+         (if-let [[data pos] r]
+           [(-seek reader (blength data)) (sub data pos)]
+           [reader nil])))))
+  ([reader n]
+   (letfn [(pred [data pos]
+             (let [i (+ pos n)]
+               (when (<= i (blength data))
+                 [data pos i])))]
+     (p/let [[reader [data pos i]] (peek-until reader pred)]
+       [(-seek reader i) (sub data pos i)]))))
 
 (defn read-line
-  ([reader] (read-line reader "\n"))
-  ([reader end] (read-line reader end false))
-  ([{:keys [data pos]} end keepend]
-   (let [end (if (string? end) (str->bytes end) end)
-         i (index-of data end pos)]
-     (if (neg? i)
-       (throw (want-read-error))
-       (let [npos (+ i (blength end))]
-         [(->reader data npos)
-          (sub data pos (if keepend npos i))])))))
+  ([reader & {:keys [end keepend charset]
+              :or {end "\r\n" keepend false}}]
+   (let [end (if-not (string? end)
+               end
+               (if-not charset
+                 (str->bytes end)
+                 (str->bytes end charset)))]
+     (letfn [(pred [data pos]
+               (when-let [i (index-of data end pos)]
+                 [data pos i]))]
+       (p/let [[reader [data pos i]] (peek-until reader pred)]
+         (let [j (+ i (blength end))]
+           [(-seek reader j)
+            (let [b (sub data pos (if-not keepend i j))]
+              (if-not charset
+                (bytes->str b)
+                (bytes->str b charset)))]))))))
 
-(defn eof? [{:keys [data pos]}]
-  (>= pos (blength data)))
+(defn read-eof [reader]
+  (let [[data pos] (-peek reader)]
+    (if (< pos (blength data))
+      [reader false]
+      (p/let [[reader r] (-peek-more reader)]
+        [reader (nil? r)]))))
 
-(defn update! [a f & args]
-  (let [[na r] (apply f @a args)]
-    (reset! a na)
-    r))
+(defn write
+  ([writer] (-flush writer))
+  ([writer b]
+   (if (bempty? b)
+     writer
+     (-write writer b))))
 
-(defn vupdate! [v f & args]
-  (let [[nv r] (apply f @v args)]
-    (vreset! v nv)
-    r))
+;;; bytes
 
-;;; writer
+(extend-type @#'btype
+  IDetachable
+  (-detach [this] this)
+  IBytesReader
+  (-peek [this]
+    [this 0])
+  (-seek [this pos]
+    (sub this pos))
+  (-peek-more [this]
+    [this nil])
+  IBytesWriter
+  (-write [this b]
+    (concat this b))
+  (-flush [this]
+    this))
+
+;;; buffer
+
+(defrecord reader [data pos]
+  IDetachable
+  (-detach [this]
+    (let [{:keys [data pos]} this]
+      (sub data pos)))
+  IBytesReader
+  (-peek [this]
+    (let [{:keys [data pos]} this]
+      [data pos]))
+  (-seek [this pos]
+    (->reader (:data this) pos))
+  (-peek-more [this]
+    [this nil]))
+
+(defrecord writer [data ring]
+  IDetachable
+  (-detach [this] (:data this))
+  IBytesWriter
+  (-write [this b]
+    (let [{:keys [data ring]} this]
+      (->writer data (cons b ring))))
+  (-flush [this]
+    (let [{:keys [data ring]} this
+          data (->> (reverse ring) (cons data) (apply concat))]
+      (->writer data nil))))
+
+(defn make-reader
+  ([] (make-reader (make-bytes 0)))
+  ([data] (make-reader data 0))
+  ([data pos] (->reader data pos)))
 
 (defn make-writer
-  ([] (list))
-  ([b] (list b)))
+  ([] (make-writer (make-bytes 0)))
+  ([data] (make-writer data nil))
+  ([data ring] (->writer data ring)))
 
-(defn write [writer b]
-  (if (zero? (blength b))
-    writer
-    (cons b writer)))
+;;; chan
 
-(defn flush [writer]
-  (->> (remove (comp zero? blength) writer)
-       reverse
-       (apply concat)))
+(defrecord chan-reader [data pos chan]
+  IDetachable
+  (-detach [this]
+    (let [{:keys [data pos chan]} this]
+      [(sub data pos) chan]))
+  ICloseable
+  (-close [this]
+    (csp/close! (:chan this)))
+  IBytesReader
+  (-peek [this]
+    (let [{:keys [data pos]} this]
+      [data pos]))
+  (-seek [this pos]
+    (let [{:keys [data chan]} this]
+      (->chan-reader data pos chan)))
+  (-peek-more [this]
+    (let [{:keys [data pos chan]} this]
+      (p/let [b (csp/take chan)]
+        (if-not b
+          [this nil]
+          (let [data (concat (sub data pos) b)]
+            [(->chan-reader data 0 chan) [data 0]]))))))
+
+(defrecord chan-writer [chan ring]
+  IDetachable
+  (-detach [this]
+    (:chan this))
+  ICloseable
+  (-close [this]
+    (csp/close! (:chan this)))
+  IBytesWriter
+  (-write [this b]
+    (let [{:keys [chan ring]} this]
+      (->chan-writer chan (cons b ring))))
+  (-flush [this]
+    (let [{:keys [chan ring]} this
+          b (->> (reverse ring) (apply concat))]
+      (if (bempty? b)
+        this
+        (p/let [ok (csp/put chan b)]
+          (if ok
+            (->chan-writer chan nil)
+            (p/rejected (want-write-error))))))))
+
+(defn make-chan-reader [chan]
+  (->chan-reader (make-bytes 0) 0 chan))
+
+(defn make-chan-writer [chan]
+  (->chan-writer chan nil))
+
+;;; stream
+
+(defrecord stream [close-chan in-chan out-chan]
+  ICloseable
+  (-close [this]
+    (csp/close! (:close-chan this))))
+
+(defn make-stream-reader [stream]
+  (make-chan-reader (:in-chan stream)))
+
+(defn make-stream-writer [stream]
+  (make-chan-writer (:out-chan stream)))
