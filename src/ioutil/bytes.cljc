@@ -1,5 +1,5 @@
 (ns ioutil.bytes
-  (:refer-clojure :exclude [bytes? bytes rand-int concat compare read read-line])
+  (:refer-clojure :exclude [bytes? rand-int concat compare read read-line])
   (:require [ioutil.bytes.impl :as impl]
             [promesa.core :as p]
             [promesa.exec.csp :as csp]))
