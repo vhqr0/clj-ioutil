@@ -1,11 +1,18 @@
 (ns ioutil.clj.streams
   (:require [promesa.core :as p]
+            [promesa.exec :as pe]
             [promesa.exec.csp :as csp]
             [ioutil.bytes :as b])
-  (:import [java.io InputStream OutputStream File FileInputStream FileOutputStream]
-           [java.net SocketAddress InetAddress InetSocketAddress
+  (:import java.time.Duration
+           [java.io
+            InputStream OutputStream File FileInputStream FileOutputStream]
+           [java.net
+            SocketAddress InetAddress InetSocketAddress
             Proxy Proxy$Type ProxySelector URI Socket]
-           javax.net.ssl.SSLSocketFactory))
+           javax.net.ssl.SSLSocketFactory
+           [java.net.http
+            HttpClient HttpClient$Builder HttpClient$Version HttpClient$Redirect
+            HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]))
 
 (defn go-close [close-chan chans callback]
   (p/vthread
@@ -14,6 +21,16 @@
      (doseq [chan chans]
        (csp/close! chan))
      (callback))))
+
+(defn make-duration-time [time]
+  (if (instance? Duration time)
+    time
+    (Duration/ofMillis time)))
+
+(defn make-int-time [time]
+  (if (instance? Duration time)
+    (.toMillis time)
+    time))
 
 ;;; io
 
@@ -94,19 +111,17 @@
   (p/vthread
    (let [input-stream (make-input-file file)
          close-chan (csp/chan)
-         in-chan (input-stream->chan input-stream close-chan)
-         out-chan (csp/chan)]
-     (go-close close-chan [in-chan out-chan] #(.close input-stream))
-     (b/->stream close-chan in-chan out-chan))))
+         in-chan (input-stream->chan input-stream close-chan)]
+     (go-close close-chan [in-chan] #(.close input-stream))
+     (b/->stream close-chan in-chan nil))))
 
 (defn make-file-output-stream [file]
   (p/vthread
    (let [output-stream (make-output-file file)
          close-chan (csp/chan)
-         in-chan (csp/chan)
          out-chan (output-stream->chan output-stream close-chan)]
-     (go-close close-chan [in-chan out-chan] #(.close output-stream))
-     (b/->stream close-chan in-chan out-chan))))
+     (go-close close-chan [out-chan] #(.close output-stream))
+     (b/->stream close-chan nil out-chan))))
 
 ;;; process
 
@@ -122,7 +137,10 @@
   ([command env dir]
    (-> (Runtime/getRuntime) (.exec command env dir))))
 
-(defrecord process [process close-chan in-chan out-chan err-chan])
+(defrecord process [process close-chan in-chan out-chan err-chan]
+  b/ICloseable
+  (-close [this]
+    (csp/close! (:close-chan this))))
 
 (defn make-process-stream
   ([process input-stream output-stream error-stream]
@@ -140,7 +158,10 @@
           error-stream (.getErrorStream process)]
       (make-process-stream process input-stream output-stream error-stream)))))
 
-;;; socket
+(defn make-process-error-reader [process]
+  (b/make-chan-reader (:err-chan process)))
+
+;;; address
 
 (defn make-address
   ([address]
@@ -161,19 +182,39 @@
   ([address port]
    (InetSocketAddress. address port)))
 
-(def make-proxy-type
+(def proxy-type
   {:direct Proxy$Type/DIRECT
-   :http Proxy$Type/HTTP
-   :socks Proxy$Type/SOCKS})
+   :http   Proxy$Type/HTTP
+   :socks  Proxy$Type/SOCKS})
 
 (defn make-proxy
-  ([proxy host port]
-   (if (= proxy :default)
-     (-> (ProxySelector/getDefault)
-         (.select (URI. "http" "" host port "" "" ""))
-         rand-nth)
-     (let [[type address] proxy]
-       (Proxy. (make-proxy-type type) (make-socket-address address))))))
+  [proxy host port]
+  (if (= proxy :default)
+    (-> (ProxySelector/getDefault)
+        (.select (URI. "http" "" host port "" "" ""))
+        rand-nth)
+    (let [[type address] proxy]
+      (Proxy. (proxy-type type) (make-socket-address address)))))
+
+(defn make-proxy-selector
+  [proxy]
+  (condp = proxy
+    :no-proxy HttpClient$Builder/NO_PROXY
+    :default  (ProxySelector/getDefault)
+    (ProxySelector/of (make-socket-address proxy))))
+
+(defn make-uri
+  ([uri]
+   (if (instance? URI uri)
+     uri
+     (if-not (vector? uri)
+       (URI. uri)
+       (apply make-uri uri))))
+  ([scheme & {:keys [user host port path query fragment]
+              :or {user "" host "" port 80 path "" query "" fragment ""}}]
+   (URI. scheme user host port path query fragment)))
+
+;;; socket
 
 (defn make-socket
   ([socket]
@@ -190,7 +231,7 @@
                   (Socket. (make-proxy proxy host port)))]
      (if-not timeout
        (.connect socket (make-socket-address host port))
-       (.connect socket (make-socket-address host port) timeout))
+       (.connect socket (make-socket-address host port) (make-int-time timeout)))
      (if-not ssl
        socket
        (-> (SSLSocketFactory/getDefault)
@@ -209,3 +250,74 @@
           input-stream (.getInputStream socket)
           output-stream (.getOutputStream socket)]
       (make-socket-stream socket input-stream output-stream)))))
+
+;;; http
+
+(def ^:dynamic *connect-timeout* (Duration/ofSeconds 2))
+(def ^:dynamic *request-timeout* (Duration/ofSeconds 5))
+
+(def http-version
+  {:http1.1 HttpClient$Version/HTTP_1_1
+   :http2   HttpClient$Version/HTTP_2})
+
+(def http-method
+  {:get     "GET"
+   :head    "HEAD"
+   :post    "POST"
+   :put     "PUT"
+   :delete  "DELETE"
+   :options "OPTIONS"
+   :trace   "TRACE"
+   :patch   "PATCH"})
+
+(def http-redirect
+  {:default HttpClient$Redirect/NORMAL
+   :always  HttpClient$Redirect/ALWAYS
+   :never   HttpClient$Redirect/NEVER})
+
+(defn make-http-body [body]
+  (cond (string? body) (HttpRequest$BodyPublishers/ofString body)
+        (bytes? body) (HttpRequest$BodyPublishers/ofByteArray body)
+        :else (HttpRequest$BodyPublishers/noBody)))
+
+(defn make-http-client
+  [& {:keys [executor proxy timeout version redirect]
+      :or {executor pe/default-vthread-executor
+           timeout *connect-timeout*}}]
+  (-> (cond-> (HttpClient/newBuilder)
+        executor (.executor @executor)
+        proxy    (.proxy (make-proxy-selector proxy))
+        timeout  (.connectTimeout (make-duration-time timeout))
+        version  (.version (http-version version))
+        redirect (.followRedirects (http-redirect redirect)))
+      (.build)))
+
+(defn make-http-request
+  [uri & {:keys [method body headers timeout version]
+          :or {method :get timeout *request-timeout*}}]
+  (let [builder (-> (HttpRequest/newBuilder)
+                    (.uri (make-uri uri))
+                    (.method (http-method method) (make-http-body body)))
+        builder (if-not headers
+                  builder
+                  (reduce
+                   (fn [builder [k v]] (.setHeader builder k v))
+                   builder headers))]
+    (-> (cond-> builder
+          timeout (.timeout (make-duration-time timeout))
+          version (.version (http-version version)))
+        (.build))))
+
+(defmulti http-send (fn [rtype client request] rtype))
+
+(defmethod http-send :discard [rtype client request]
+  (.sendAsync client request (HttpResponse$BodyHandlers/discarding)))
+
+(defmethod http-send :str [rtype client request]
+  (.sendAsync client request (HttpResponse$BodyHandlers/ofString)))
+
+(defmethod http-send :bytes [rtype client request]
+  (.sendAsync client request (HttpResponse$BodyHandlers/ofByteArray)))
+
+(defmethod http-send :input-stream [rtype client request]
+  (.sendAsync client request (HttpResponse$BodyHandlers/ofInputStream)))

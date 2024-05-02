@@ -151,22 +151,24 @@
   "Parse hex string."
   [s] (-> (HexFormat/of) (.parseHex s)))
 
-(def ^:dynamic *base64-encoder-factory*
-  {:default (fn [] (Base64/getEncoder))
-   :url     (fn [] (Base64/getUrlEncoder))
-   :mime    (fn [] (Base64/getMimeEncoder))})
+(defn- make-base64-encoder [encoder]
+  (case encoder
+    :default (Base64/getEncoder)
+    :url     (Base64/getUrlEncoder)
+    :mime    (Base64/getMimeEncoder)))
 
-(def ^:dynamic *base64-decoder-factory*
-  {:default (fn [] (Base64/getDecoder))
-   :url     (fn [] (Base64/getUrlDecoder))
-   :mime    (fn [] (Base64/getMimeDecoder))})
+(defn- make-base64-decoder [decoder]
+  (case decoder
+    :default (Base64/getDecoder)
+    :url     (Base64/getUrlDecoder)
+    :mime    (Base64/getMimeDecoder)))
 
 (defn bytes->base64
   "Convert bytes to base64 string.
   The optional encoder can specify a base64 variant (:default :url :mime)."
   ([b] (bytes->base64 b :default))
   ([b encoder]
-   (-> ((*base64-encoder-factory* encoder))
+   (-> (make-base64-encoder encoder)
        (.encode b)
        bytes->str)))
 
@@ -174,7 +176,7 @@
   "Parse base64 string."
   ([s] (base64->bytes s :default))
   ([s decoder]
-   (-> ((*base64-decoder-factory* decoder))
+   (-> (make-base64-decoder decoder)
        (.decode s))))
 
 ;;; num
