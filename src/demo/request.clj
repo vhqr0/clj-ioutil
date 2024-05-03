@@ -38,7 +38,7 @@
 (defn request2 [uri & {:keys [client-opts request-opts]}]
   (let [client (apply streams/make-http-client client-opts)
         request (apply streams/make-http-request uri request-opts)]
-    (p/let [resp (streams/http-send :str client request)]
+    (p/let [resp (streams/http-send :text client request)]
       (println (.headers resp))
       (println (.body resp)))))
 

@@ -18,11 +18,13 @@
 
 (defn go-close [close-chan chans callback]
   (p/vthread
-   (p/let [_ (csp/take close-chan)]
-     (csp/close! close-chan)
-     (doseq [chan chans]
-       (csp/close! chan))
-     (callback))))
+   (-> (csp/take close-chan)
+       (p/finally
+         (fn [_ _]
+           (csp/close! close-chan)
+           (doseq [chan chans]
+             (csp/close! chan))
+           (callback))))))
 
 (defn make-duration-time [time]
   (if (instance? Duration time)
@@ -44,8 +46,8 @@
   ([input-stream buffer]
    (fn []
      (let [n (.read input-stream buffer)]
-       (assert (pos? n))
-       (b/sub buffer 0 n)))))
+       (when (pos? n)
+         (b/sub buffer 0 n))))))
 
 (defn output-stream->writefn [output-stream]
   (fn [b]
@@ -53,29 +55,34 @@
     (.flush output-stream)))
 
 (defn input-stream->chan
-  [input-stream close-chan]
-  (let [chan (csp/chan)
-        read (input-stream->readfn input-stream)]
-    (p/vthread
-     (-> (p/loop [b (p/vthread (read))]
-           (p/let [ok (csp/put chan b)]
-             (assert ok)
-             (p/recur (p/vthread (read)))))
-         (p/catch #(csp/close! close-chan %))))
-    chan))
+  ([input-stream close-chan]
+   (input-stream->chan input-stream close-chan (csp/chan)))
+  ([input-stream close-chan chan]
+   (let [read (input-stream->readfn input-stream)]
+     (p/vthread
+      (-> (p/loop [b (p/vthread (read))]
+            (if-not b
+              (csp/close! chan)
+              (p/let [ok (csp/put chan b)]
+                (assert ok)
+                (p/recur (p/vthread (read))))))
+          (p/catch #(csp/close! close-chan %))))
+     chan)))
 
 (defn output-stream->chan
-  [output-stream close-chan]
-  (let [chan (csp/chan :buf 1 :xf (remove b/bempty?))
-        write (output-stream->writefn output-stream)]
-    (p/vthread
-     (-> (p/loop [b (csp/take chan)]
-           (assert b)
-           (when-not (b/bempty? b)
-             (write b))
-           (p/recur (csp/take chan)))
-         (p/catch #(csp/close! close-chan %))))
-    chan))
+  ([output-stream close-chan]
+   (output-stream->chan output-stream close-chan
+                        (csp/chan :buf 1 :xf (remove b/bempty?))))
+  ([output-stream close-chan chan]
+   (let [write (output-stream->writefn output-stream)]
+     (p/vthread
+      (-> (p/loop [b (csp/take chan)]
+            (when b
+              (when-not (b/bempty? b)
+                (write b))
+              (p/recur (csp/take chan))))
+          (p/catch #(csp/close! close-chan %))))
+     chan)))
 
 ;;; file
 
@@ -115,7 +122,7 @@
          close-chan (csp/chan)
          in-chan (input-stream->chan input-stream close-chan)]
      (go-close close-chan [in-chan] #(.close input-stream))
-     (b/->stream close-chan in-chan nil))))
+     (b/->stream input-stream close-chan in-chan nil))))
 
 (defn make-file-write-stream [file]
   (p/vthread
@@ -123,7 +130,7 @@
          close-chan (csp/chan)
          out-chan (output-stream->chan output-stream close-chan)]
      (go-close close-chan [out-chan] #(.close output-stream))
-     (b/->stream close-chan nil out-chan))))
+     (b/->stream output-stream close-chan nil out-chan))))
 
 ;;; process
 
@@ -139,11 +146,6 @@
   ([command env dir]
    (-> (Runtime/getRuntime) (.exec command env dir))))
 
-(defrecord process [process close-chan in-chan out-chan err-chan]
-  b/ICloseable
-  (-close [this]
-    (csp/close! (:close-chan this))))
-
 (defn make-process-stream
   ([process input-stream output-stream error-stream]
    (let [close-chan (csp/chan)
@@ -151,7 +153,7 @@
          out-chan (output-stream->chan output-stream close-chan)
          err-chan (output-stream->chan error-stream close-chan)]
      (go-close close-chan [in-chan out-chan err-chan] #(.destroy process))
-     (->process process close-chan in-chan out-chan err-chan)))
+     (b/->error-stream process close-chan in-chan out-chan err-chan)))
   ([process]
    (p/vthread
     (let [process (make-process process)
@@ -159,9 +161,6 @@
           output-stream (.getOutputStream process)
           error-stream (.getErrorStream process)]
       (make-process-stream process input-stream output-stream error-stream)))))
-
-(defn make-process-error-reader [process]
-  (b/make-chan-reader (:err-chan process)))
 
 ;;; address
 
@@ -245,7 +244,7 @@
          in-chan (input-stream->chan input-stream close-chan)
          out-chan (output-stream->chan output-stream close-chan)]
      (go-close close-chan [in-chan out-chan] #(.close socket))
-     (b/->stream close-chan in-chan out-chan)))
+     (b/->stream socket close-chan in-chan out-chan)))
   ([socket]
    (p/vthread
     (let [socket (make-socket socket)
@@ -255,8 +254,8 @@
 
 ;;; http
 
-(def ^:dynamic *connect-timeout* (Duration/ofSeconds 2))
-(def ^:dynamic *request-timeout* (Duration/ofSeconds 5))
+(def ^:dynamic *http-connect-timeout* (Duration/ofSeconds 2))
+(def ^:dynamic *http-request-timeout* (Duration/ofSeconds 5))
 
 (def http-version
   {:http1.1 HttpClient$Version/HTTP_1_1
@@ -285,7 +284,7 @@
 (defn make-http-client
   [& {:keys [executor proxy timeout version redirect]
       :or {executor pe/default-vthread-executor
-           timeout *connect-timeout*}}]
+           timeout *http-connect-timeout*}}]
   (-> (cond-> (HttpClient/newBuilder)
         executor (.executor @executor)
         proxy    (.proxy (make-proxy-selector proxy))
@@ -301,7 +300,7 @@
 
 (defn make-http-request
   [uri & {:keys [method body headers timeout version]
-          :or {method :get timeout *request-timeout*}}]
+          :or {method :get timeout *http-request-timeout*}}]
   (-> (cond-> (HttpRequest/newBuilder)
         headers (http-builder-add-headers headers)
         timeout (.timeout (make-duration-time timeout))
@@ -324,90 +323,98 @@
 (defmethod http-send :stream [rtype client request]
   (.sendAsync client request (HttpResponse$BodyHandlers/ofInputStream)))
 
-(defn make-http-stream [client request]
+(defn make-http-read-stream [client request]
   (p/let [response (http-send :stream client request)]
-    [response (make-file-read-stream (.body response))]))
+    (let [input-stream (.body response)
+          close-chan (csp/chan)
+          in-chan (input-stream->chan input-stream close-chan)]
+      (go-close close-chan [in-chan] #(.close input-stream))
+      (b/->stream response close-chan in-chan nil))))
 
 ;;; websocket
 
+(def ^:dynamic *websocket-connect-timeout* (Duration/ofSeconds 5))
+
+(defn- websocket-builder-add-subprotocols [builder subprotocols]
+  (.subprotocols builder (first subprotocols)
+                 (into-array java.lang.String (rest subprotocols))))
+
 (defn make-websocket
   [client uri listener & {:keys [headers subprotocols timeout]
-                          :or {timeout *request-timeout*}}]
+                          :or {timeout *websocket-connect-timeout*}}]
   (-> (cond-> (.newWebSocketBuilder client)
         headers (http-builder-add-headers headers)
-        subprotocols (.subprotocols (first subprotocols)
-                                    (into-array java.lang.String (rest subprotocols)))
+        subprotocols (websocket-builder-add-subprotocols subprotocols)
         timeout (.connectTimeout (make-duration-time timeout)))
       (.buildAsync (make-uri uri) listener)))
-
-(defrecord websocket [websocket close-chan in-chan out-chan]
-  b/ICloseable
-  (-close [this]
-    (csp/close! (:close-chan this))))
 
 (defn- copy-byte-buffer [bb]
   (let [b (b/make-bytes (.remaining bb))]
     (.get bb b)
     b))
 
-(defn make-websocket-in-chan
-  [close-chan & {:keys [bytes-only] :or {bytes-only false}}]
-  (let [chan (csp/chan :buf 1024)
-        texts (volatile! [])
-        bins (volatile! [])
-        listener
-        (reify WebSocket$Listener
-          (onText [this websocket data last]
-            (try
-              (assert (not bytes-only))
-              (vswap! texts conj (str data))
-              (when last
-                (let [ok (csp/put! chan (apply str @texts))]
-                  (vreset! texts [])
-                  (assert ok)))
-              (catch Exception err
-                (csp/close! close-chan err)))
-            nil)
-          (onBinary [this websocket data last]
-            (try
-              (vswap! bins conj (copy-byte-buffer data))
-              (when last
-                (let [ok (csp/put! chan (apply b/concat @bins))]
-                  (vreset! bins [])
-                  (assert ok)))
-              (catch Exception err
-                (csp/close! close-chan err)))
-            nil)
-          (onClose [this websocket code reason]
-            (csp/close! chan)
-            nil)
-          (onError [this websocket err]
-            (csp/close! close-chan err)))]
-    [chan listener]))
+(def ^:dynamic *websocket-chan-size* 1024)
 
-(defn make-websocket-out-chan [websocket close-chan]
-  (let [chan (csp/chan)]
-    (p/vthread
-     (-> (p/loop [data (csp/take chan)]
-           (cond (string? data) (p/do
-                                  (.sendText websocket (.subSequence data 0 (count data)) true)
-                                  (p/recur (csp/take chan)))
-                 (bytes? data) (p/do
-                                 (.sendBinary websocket (ByteBuffer/wrap data) true)
+(defn make-websocket-in-chan
+  ([close-chan]
+   (make-websocket-in-chan close-chan (csp/chan :buf *websocket-chan-size*)))
+  ([close-chan chan]
+   (let [texts (volatile! [])
+         bins (volatile! [])
+         listener
+         (reify WebSocket$Listener
+           (onText [this websocket data last]
+             (try
+               (vswap! texts conj (str data))
+               (when last
+                 (let [ok (csp/put! chan (apply str @texts))]
+                   (vreset! texts [])
+                   (assert ok)))
+               (catch Exception err
+                 (csp/close! close-chan err)))
+             nil)
+           (onBinary [this websocket data last]
+             (try
+               (vswap! bins conj (copy-byte-buffer data))
+               (when last
+                 (let [ok (csp/put! chan (apply b/concat @bins))]
+                   (vreset! bins [])
+                   (assert ok)))
+               (catch Exception err
+                 (csp/close! close-chan err)))
+             nil)
+           (onClose [this websocket code reason]
+             (csp/close! chan)
+             nil)
+           (onError [this websocket err]
+             (csp/close! close-chan err)))]
+     [chan listener])))
+
+(defn make-websocket-out-chan
+  ([websocket close-chan]
+   (make-websocket-out-chan websocket close-chan (csp/chan)))
+  ([websocket close-chan chan]
+   (p/vthread
+    (-> (p/loop [data (csp/take chan)]
+          (cond (string? data) (p/do
+                                 (.sendText websocket (.subSequence data 0 (count data)) true)
                                  (p/recur (csp/take chan)))
-                 :else (do (assert (not data))
-                           (.sendClose websocket WebSocket/NORMAL_CLOSURE ""))))
-         (p/catch #(csp/close! close-chan %))))
-    chan))
+                (bytes? data) (p/do
+                                (.sendBinary websocket (ByteBuffer/wrap data) true)
+                                (p/recur (csp/take chan)))
+                :else (do (assert (not data))
+                          (.sendClose websocket WebSocket/NORMAL_CLOSURE ""))))
+        (p/catch #(csp/close! close-chan %))))
+   chan))
 
 (defn make-websocket-stream
   [client uri & opts]
   (let [close-chan (csp/chan)
-        [in-chan listener] (apply make-websocket-in-chan close-chan opts)]
+        [in-chan listener] (make-websocket-in-chan close-chan)]
     (p/let [websocket (apply make-websocket client uri listener opts)]
       (let [out-chan (make-websocket-out-chan websocket close-chan)]
         (go-close close-chan [in-chan out-chan] #(.abort websocket))
-        (->websocket websocket close-chan in-chan out-chan)))))
+        (b/->stream websocket close-chan in-chan out-chan)))))
 
 (defn websocket-send
   ([websocket]

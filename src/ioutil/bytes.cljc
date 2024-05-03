@@ -121,6 +121,13 @@
      (p/let [[reader [data pos i]] (peek-until reader pred)]
        [(-seek reader i) (sub data pos i)]))))
 
+(defn read-all [reader]
+  (p/loop [reader reader bs []]
+    (p/let [[reader b] (read reader)]
+      (if-not b
+        [reader (apply concat bs)]
+        (p/recur reader (conj bs b))))))
+
 (defn read-line
   ([reader & {:keys [end keepend charset]
               :or {end "\r\n" keepend false}}]
@@ -188,17 +195,20 @@
   (-peek-more [this]
     [this nil]))
 
-(defrecord writer [data ring]
+(defrecord writer [ring]
   IDetachable
-  (-detach [this] (:data this))
+  (-detach [this]
+    (let [{:keys [ring]} this]
+      (if (empty? ring)
+        (make-bytes 0)
+        (first ring))))
   IBytesWriter
   (-write [this b]
-    (let [{:keys [data ring]} this]
-      (->writer data (cons b ring))))
+    (let [{:keys [ring]} this]
+      (->writer (conj ring b))))
   (-flush [this]
-    (let [{:keys [data ring]} this
-          data (->> (reverse ring) (cons data) (apply concat))]
-      (->writer data nil))))
+    (let [{:keys [ring]} this]
+      (->writer [(apply concat ring)]))))
 
 (defn make-reader
   ([] (make-reader (make-bytes 0)))
@@ -206,9 +216,8 @@
   ([data pos] (->reader data pos)))
 
 (defn make-writer
-  ([] (make-writer (make-bytes 0)))
-  ([data] (make-writer data nil))
-  ([data ring] (->writer data ring)))
+  ([] (->writer []))
+  ([data] (->writer [data])))
 
 ;;; chan
 
@@ -245,26 +254,31 @@
   IBytesWriter
   (-write [this b]
     (let [{:keys [chan ring]} this]
-      (->chan-writer chan (cons b ring))))
+      (->chan-writer chan (conj ring b))))
   (-flush [this]
     (let [{:keys [chan ring]} this
-          b (->> (reverse ring) (apply concat))]
+          b (apply concat ring)]
       (if (bempty? b)
         this
         (p/let [ok (csp/put chan b)]
           (if ok
-            (->chan-writer chan nil)
+            (->chan-writer chan [])
             (p/rejected (want-write-error))))))))
 
 (defn make-chan-reader [chan]
   (->chan-reader (make-bytes 0) 0 chan))
 
 (defn make-chan-writer [chan]
-  (->chan-writer chan nil))
+  (->chan-writer chan []))
 
 ;;; stream
 
-(defrecord stream [close-chan in-chan out-chan]
+(defrecord stream [resource close-chan in-chan out-chan]
+  ICloseable
+  (-close [this]
+    (csp/close! (:close-chan this))))
+
+(defrecord error-stream [resource close-chan in-chan out-chan err-chan]
   ICloseable
   (-close [this]
     (csp/close! (:close-chan this))))
@@ -274,3 +288,6 @@
 
 (defn make-stream-writer [stream]
   (make-chan-writer (:out-chan stream)))
+
+(defn make-stream-error-reader [stream]
+  (make-chan-reader (:err-chan stream)))
