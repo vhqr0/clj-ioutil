@@ -8,8 +8,8 @@
            [java.io
             InputStream OutputStream File FileInputStream FileOutputStream]
            [java.net
-            SocketAddress InetAddress InetSocketAddress
-            Proxy Proxy$Type ProxySelector URI Socket]
+            SocketAddress InetAddress InetSocketAddress Socket
+            Proxy Proxy$Type ProxySelector URI Authenticator PasswordAuthentication]
            javax.net.ssl.SSLSocketFactory
            [java.net.http
             HttpClient HttpClient$Builder HttpClient$Version HttpClient$Redirect
@@ -215,7 +215,23 @@
               :or {user "" host "" port 80 path "" query "" fragment ""}}]
    (URI. scheme user host port path query fragment)))
 
+(defn make-auth
+  ([auth]
+   (if (instance? Authenticator auth)
+     auth
+     (do
+       (assert (vector? auth))
+       (apply make-auth auth))))
+  ([]
+   (Authenticator/getDefault))
+  ([username password]
+   (proxy [Authenticator] []
+     (getPasswordAuthentication []
+       (PasswordAuthentication. username (.toCharArray password))))))
+
 ;;; socket
+
+(def ^:dynamic *socket-connect-timeout* (Duration/ofSeconds 2))
 
 (defn make-socket
   ([socket]
@@ -226,7 +242,8 @@
        (apply make-socket socket))))
   ([host port]
    (Socket. host port))
-  ([host port & {:keys [timeout proxy ssl] :or {ssl false}}]
+  ([host port & {:keys [timeout proxy ssl]
+                 :or {timeout *socket-connect-timeout* ssl false}}]
    (let [socket (if-not proxy
                   (Socket.)
                   (Socket. (make-proxy proxy host port)))]
@@ -282,14 +299,15 @@
         :else (HttpRequest$BodyPublishers/noBody)))
 
 (defn make-http-client
-  [& {:keys [executor proxy timeout version redirect]
+  [& {:keys [executor proxy auth version timeout redirect]
       :or {executor pe/default-vthread-executor
            timeout *http-connect-timeout*}}]
   (-> (cond-> (HttpClient/newBuilder)
         executor (.executor @executor)
         proxy    (.proxy (make-proxy-selector proxy))
-        timeout  (.connectTimeout (make-duration-time timeout))
+        auth     (.authenticator (make-auth auth))
         version  (.version (http-version version))
+        timeout  (.connectTimeout (make-duration-time timeout))
         redirect (.followRedirects (http-redirect redirect)))
       (.build)))
 
@@ -299,12 +317,12 @@
    builder headers))
 
 (defn make-http-request
-  [uri & {:keys [method body headers timeout version]
+  [uri & {:keys [method body headers version timeout]
           :or {method :get timeout *http-request-timeout*}}]
   (-> (cond-> (HttpRequest/newBuilder)
         headers (http-builder-add-headers headers)
-        timeout (.timeout (make-duration-time timeout))
-        version (.version (http-version version)))
+        version (.version (http-version version))
+        timeout (.timeout (make-duration-time timeout)))
       (.method (http-method method) (make-http-body body))
       (.uri (make-uri uri))
       (.build)))
