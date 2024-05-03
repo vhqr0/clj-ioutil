@@ -41,3 +41,15 @@
     (p/let [resp (streams/http-send :str client request)]
       (println (.headers resp))
       (println (.body resp)))))
+
+;; wss://echo.websocket.org
+(defn ws-echo [uri & {:keys [message] :or {message "hello"}}]
+  (let [client (streams/make-http-client)]
+    (p/let [stream (streams/make-websocket-stream client uri)]
+      (-> (p/do
+            (streams/websocket-send stream message)
+            (println "sent" message)
+            (p/let [message (streams/websocket-recv stream)]
+              (println "recv" message))
+            (streams/websocket-send stream))
+          (p/finally (fn [_ _] (b/close stream)))))))

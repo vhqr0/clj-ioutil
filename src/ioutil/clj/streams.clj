@@ -4,6 +4,7 @@
             [promesa.exec.csp :as csp]
             [ioutil.bytes :as b])
   (:import java.time.Duration
+           java.nio.ByteBuffer
            [java.io
             InputStream OutputStream File FileInputStream FileOutputStream]
            [java.net
@@ -12,7 +13,8 @@
            javax.net.ssl.SSLSocketFactory
            [java.net.http
             HttpClient HttpClient$Builder HttpClient$Version HttpClient$Redirect
-            HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]))
+            HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers
+            WebSocket WebSocket$Listener]))
 
 (defn go-close [close-chan chans callback]
   (p/vthread
@@ -64,7 +66,7 @@
 
 (defn output-stream->chan
   [output-stream close-chan]
-  (let [chan (csp/chan 1 (remove b/bempty?))
+  (let [chan (csp/chan :buf 1 :xf (remove b/bempty?))
         write (output-stream->writefn output-stream)]
     (p/vthread
      (-> (p/loop [b (csp/take chan)]
@@ -89,35 +91,35 @@
   ([parent child]
    (File. parent child)))
 
-(defn make-input-file
+(defn make-file-input-stream
   ([file]
    (if (instance? InputStream file)
      file
      (if-not (vector? file)
        (FileInputStream. file)
-       (apply make-input-file file)))))
+       (apply make-file-input-stream file)))))
 
-(defn make-output-file
+(defn make-file-output-stream
   ([file]
    (if (instance? OutputStream file)
      file
      (if-not (vector? file)
        (FileOutputStream. file)
-       (apply make-output-file file))))
+       (apply make-file-output-stream file))))
   ([file & {:keys [append] :or {append false}}]
    (FileOutputStream. file append)))
 
-(defn make-file-input-stream [file]
+(defn make-file-read-stream [file]
   (p/vthread
-   (let [input-stream (make-input-file file)
+   (let [input-stream (make-file-input-stream file)
          close-chan (csp/chan)
          in-chan (input-stream->chan input-stream close-chan)]
      (go-close close-chan [in-chan] #(.close input-stream))
      (b/->stream close-chan in-chan nil))))
 
-(defn make-file-output-stream [file]
+(defn make-file-write-stream [file]
   (p/vthread
-   (let [output-stream (make-output-file file)
+   (let [output-stream (make-file-output-stream file)
          close-chan (csp/chan)
          out-chan (output-stream->chan output-stream close-chan)]
      (go-close close-chan [out-chan] #(.close output-stream))
@@ -292,32 +294,127 @@
         redirect (.followRedirects (http-redirect redirect)))
       (.build)))
 
+(defn- http-builder-add-headers [builder headers]
+  (reduce
+   (fn [builder [k v]] (.header builder k v))
+   builder headers))
+
 (defn make-http-request
   [uri & {:keys [method body headers timeout version]
           :or {method :get timeout *request-timeout*}}]
-  (let [builder (-> (HttpRequest/newBuilder)
-                    (.uri (make-uri uri))
-                    (.method (http-method method) (make-http-body body)))
-        builder (if-not headers
-                  builder
-                  (reduce
-                   (fn [builder [k v]] (.setHeader builder k v))
-                   builder headers))]
-    (-> (cond-> builder
-          timeout (.timeout (make-duration-time timeout))
-          version (.version (http-version version)))
-        (.build))))
+  (-> (cond-> (HttpRequest/newBuilder)
+        headers (http-builder-add-headers headers)
+        timeout (.timeout (make-duration-time timeout))
+        version (.version (http-version version)))
+      (.method (http-method method) (make-http-body body))
+      (.uri (make-uri uri))
+      (.build)))
 
 (defmulti http-send (fn [rtype client request] rtype))
 
 (defmethod http-send :discard [rtype client request]
   (.sendAsync client request (HttpResponse$BodyHandlers/discarding)))
 
-(defmethod http-send :str [rtype client request]
+(defmethod http-send :text [rtype client request]
   (.sendAsync client request (HttpResponse$BodyHandlers/ofString)))
 
-(defmethod http-send :bytes [rtype client request]
+(defmethod http-send :bin [rtype client request]
   (.sendAsync client request (HttpResponse$BodyHandlers/ofByteArray)))
 
-(defmethod http-send :input-stream [rtype client request]
+(defmethod http-send :stream [rtype client request]
   (.sendAsync client request (HttpResponse$BodyHandlers/ofInputStream)))
+
+(defn make-http-stream [client request]
+  (p/let [response (http-send :stream client request)]
+    [response (make-file-read-stream (.body response))]))
+
+;;; websocket
+
+(defn make-websocket
+  [client uri listener & {:keys [headers subprotocols timeout]
+                          :or {timeout *request-timeout*}}]
+  (-> (cond-> (.newWebSocketBuilder client)
+        headers (http-builder-add-headers headers)
+        subprotocols (.subprotocols (first subprotocols)
+                                    (into-array java.lang.String (rest subprotocols)))
+        timeout (.connectTimeout (make-duration-time timeout)))
+      (.buildAsync (make-uri uri) listener)))
+
+(defrecord websocket [websocket close-chan in-chan out-chan]
+  b/ICloseable
+  (-close [this]
+    (csp/close! (:close-chan this))))
+
+(defn- copy-byte-buffer [bb]
+  (let [b (b/make-bytes (.remaining bb))]
+    (.get bb b)
+    b))
+
+(defn make-websocket-in-chan
+  [close-chan & {:keys [bytes-only] :or {bytes-only false}}]
+  (let [chan (csp/chan :buf 1024)
+        texts (volatile! [])
+        bins (volatile! [])
+        listener
+        (reify WebSocket$Listener
+          (onText [this websocket data last]
+            (try
+              (assert (not bytes-only))
+              (vswap! texts conj (str data))
+              (when last
+                (let [ok (csp/put! chan (apply str @texts))]
+                  (vreset! texts [])
+                  (assert ok)))
+              (catch Exception err
+                (csp/close! close-chan err)))
+            nil)
+          (onBinary [this websocket data last]
+            (try
+              (vswap! bins conj (copy-byte-buffer data))
+              (when last
+                (let [ok (csp/put! chan (apply b/concat @bins))]
+                  (vreset! bins [])
+                  (assert ok)))
+              (catch Exception err
+                (csp/close! close-chan err)))
+            nil)
+          (onClose [this websocket code reason]
+            (csp/close! chan)
+            nil)
+          (onError [this websocket err]
+            (csp/close! close-chan err)))]
+    [chan listener]))
+
+(defn make-websocket-out-chan [websocket close-chan]
+  (let [chan (csp/chan)]
+    (p/vthread
+     (-> (p/loop [data (csp/take chan)]
+           (cond (string? data) (p/do
+                                  (.sendText websocket (.subSequence data 0 (count data)) true)
+                                  (p/recur (csp/take chan)))
+                 (bytes? data) (p/do
+                                 (.sendBinary websocket (ByteBuffer/wrap data) true)
+                                 (p/recur (csp/take chan)))
+                 :else (do (assert (not data))
+                           (.sendClose websocket WebSocket/NORMAL_CLOSURE ""))))
+         (p/catch #(csp/close! close-chan %))))
+    chan))
+
+(defn make-websocket-stream
+  [client uri & opts]
+  (let [close-chan (csp/chan)
+        [in-chan listener] (apply make-websocket-in-chan close-chan opts)]
+    (p/let [websocket (apply make-websocket client uri listener opts)]
+      (let [out-chan (make-websocket-out-chan websocket close-chan)]
+        (go-close close-chan [in-chan out-chan] #(.abort websocket))
+        (->websocket websocket close-chan in-chan out-chan)))))
+
+(defn websocket-send
+  ([websocket]
+   (csp/close! (:out-chan websocket)))
+  ([websocket data]
+   (p/let [ok (csp/put (:out-chan websocket) data)]
+     (assert ok))))
+
+(defn websocket-recv [websocket]
+  (csp/take (:in-chan websocket)))
