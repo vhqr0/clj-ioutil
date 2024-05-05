@@ -1,5 +1,5 @@
 (ns ioutil.bytes.impl
-  (:refer-clojure :exclude [bytes? rand-int concat compare])
+  (:refer-clojure :exclude [rand-int concat compare])
   (:require [clojure.core :as c]
             [ioutil.bytes.util :as u]
             [ioutil.clj.array :as a])
@@ -9,7 +9,6 @@
            java.util.Base64))
 
 (def make-bytes byte-array)
-(def bytes? c/bytes?)
 
 (def btype (type (byte-array 0)))
 (def bcast bytes)
@@ -19,26 +18,14 @@
 
 (def bget aget)
 (def bseq seq)
-
-(defn brseq [b]
-  (map #(aget b %) (range (dec (alength b)) -1 -1)))
+(defn brseq [b] (map #(aget b %) (range (dec (alength b)) -1 -1)))
 
 (def bget-unsigned #(bit-and 0xff (bget %1 %2)))
-
 (defn bseq-unsigned [b] (map #(bit-and 0xff %) (bseq b)))
 (defn brseq-unsigned [b] (map #(bit-and 0xff %) (brseq b)))
 
-(defn sub
-  ([b] b)
-  ([b s] (if (zero? s) b (a/sub b s)))
-  ([b s e] (a/sub b s e)))
-
-(defn concat [& bs]
-  (let [bs (remove bempty? bs)]
-    (cond (empty? bs) (byte-array 0)
-          (empty? (rest bs)) (first bs)
-          :else (apply a/concat bs))))
-
+(def sub a/sub!)
+(defn concat [& bs] (or (apply a/concat! bs) (byte-array 0)))
 (def equals? a/equals?)
 (def compare a/compare)
 (def index-of a/index-of)

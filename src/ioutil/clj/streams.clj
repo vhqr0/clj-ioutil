@@ -2,6 +2,7 @@
   (:require [promesa.core :as p]
             [promesa.exec :as pe]
             [promesa.exec.csp :as csp]
+            [ioutil.clj.array :as arr]
             [ioutil.bytes :as b])
   (:import java.time.Duration
            java.nio.ByteBuffer
@@ -47,7 +48,8 @@
    (fn []
      (let [n (.read input-stream buffer)]
        (when (pos? n)
-         (b/sub buffer 0 n))))))
+         ;; use pure sub here
+         (arr/sub buffer 0 n))))))
 
 (defn output-stream->writefn [output-stream]
   (fn [b]
@@ -78,8 +80,7 @@
      (p/vthread
       (-> (p/loop [b (csp/take chan)]
             (when b
-              (when-not (b/bempty? b)
-                (write b))
+              (write b)
               (p/recur (csp/take chan))))
           (p/catch #(csp/close! close-chan %))))
      chan)))
@@ -97,6 +98,11 @@
    (File. "."))
   ([parent child]
    (File. parent child)))
+
+(comment
+  (do
+    (println (str (make-file ".gitignore")))
+    (println (str (make-file (System/getenv "HOME") "work")))))
 
 (defn make-file-input-stream
   ([file]
@@ -132,6 +138,20 @@
      (go-close close-chan [out-chan] #(.close output-stream))
      (b/->stream output-stream close-chan nil out-chan))))
 
+(comment
+  (do
+    (def f ".gitignore")
+    (def s @(make-file-read-stream f))
+    @(p/let [r (b/make-stream-reader s)
+             [r it] (b/read-all r)]
+       (println (b/bytes->str it))))
+  (do
+    (def f "target/test.txt")
+    (def s @(make-file-write-stream f))
+    @(p/let [w (b/make-stream-writer s)
+             w (b/write w (b/str->bytes "hello\n"))]
+       (b/write w))))
+
 ;;; process
 
 (defn make-process
@@ -162,6 +182,13 @@
           error-stream (.getErrorStream process)]
       (make-process-stream process input-stream output-stream error-stream)))))
 
+(comment
+  (do
+    (def s @(make-process-stream "ls"))
+    @(p/let [r (b/make-stream-reader s)
+             [r it] (b/read-all r)]
+       (println (b/bytes->str it)))))
+
 ;;; address
 
 (defn make-address
@@ -171,7 +198,14 @@
      (if-not (vector? address)
        (InetAddress/getByName address)
        (apply make-address address))))
-  ([] (InetAddress/getLocalHost)))
+  ([]
+   (InetAddress/getLocalHost)))
+
+(comment
+  (do
+    (println (str (make-address "localhost")))
+    (println (str (make-address "bing.com")))
+    (println (str (make-address "127.0.0.1")))))
 
 (defn make-socket-address
   ([address]
@@ -182,6 +216,11 @@
        (apply make-socket-address address))))
   ([address port]
    (InetSocketAddress. address port)))
+
+(comment
+  (do
+    (println (str (make-socket-address 80)))
+    (println (str (make-socket-address "bing.com" 80)))))
 
 (def proxy-type
   {:direct Proxy$Type/DIRECT
@@ -196,6 +235,12 @@
         rand-nth)
     (let [[type address] proxy]
       (Proxy. (proxy-type type) (make-socket-address address)))))
+
+(comment
+  (do
+    (println (str (make-proxy :default "bing.com" 80)))
+    (println (str (make-proxy :default "google.com" 80)))
+    (println (str (make-proxy [:socks 1080] "google.com" 80)))))
 
 (defn make-proxy-selector
   [proxy]
@@ -214,6 +259,11 @@
   ([scheme & {:keys [user host port path query fragment]
               :or {user "" host "" port 80 path "" query "" fragment ""}}]
    (URI. scheme user host port path query fragment)))
+
+(comment
+  (do
+    (println (str (make-uri "http://bing.com?s=clojure")))
+    (println (str (make-uri "http" :host "bing.com" :query "s=clojure")))))
 
 (defn make-auth
   ([auth]
@@ -268,6 +318,17 @@
           input-stream (.getInputStream socket)
           output-stream (.getOutputStream socket)]
       (make-socket-stream socket input-stream output-stream)))))
+
+(comment
+  (do
+    (def h "bing.com")
+    (def s @(make-socket-stream [h 80]))
+    @(p/let [w (b/make-stream-writer s)
+             w (b/write w (b/str->bytes (str "GET / HTTP/1.1\r\nHost: " h "\r\n\r\n")))]
+       (b/write w))
+    @(p/let [r (b/make-stream-reader s)
+             [r it] (b/read r)]
+       (println (b/bytes->str it)))))
 
 ;;; http
 
@@ -349,6 +410,14 @@
       (go-close close-chan [in-chan] #(.close input-stream))
       (b/->stream response close-chan in-chan nil))))
 
+(comment
+  (do
+    (def u "https://www.bing.com")
+    (def s @(make-http-read-stream (make-http-client) (make-http-request u)))
+    @(p/let [r (b/make-stream-reader s)
+             [r it] (b/read-all r)]
+       (println (b/bytes->str it)))))
+
 ;;; websocket
 
 (def ^:dynamic *websocket-connect-timeout* (Duration/ofSeconds 5))
@@ -365,11 +434,6 @@
         subprotocols (websocket-builder-add-subprotocols subprotocols)
         timeout (.connectTimeout (make-duration-time timeout)))
       (.buildAsync (make-uri uri) listener)))
-
-(defn- copy-byte-buffer [bb]
-  (let [b (b/make-bytes (.remaining bb))]
-    (.get bb b)
-    b))
 
 (def ^:dynamic *websocket-chan-size* 1024)
 
@@ -393,7 +457,7 @@
              nil)
            (onBinary [this websocket data last]
              (try
-               (vswap! bins conj (copy-byte-buffer data))
+               (vswap! bins conj (b/sub data))
                (when last
                  (let [ok (csp/put! chan (apply b/concat @bins))]
                    (vreset! bins [])
@@ -443,3 +507,10 @@
 
 (defn websocket-recv [websocket]
   (csp/take (:in-chan websocket)))
+
+(comment
+  (do
+    (def u "wss://echo.websocket.org")
+    (def s @(make-websocket-stream (make-http-client) u))
+    @(p/let [it (websocket-recv s)]
+       (println it))))

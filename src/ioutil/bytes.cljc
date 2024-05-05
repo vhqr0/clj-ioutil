@@ -1,5 +1,5 @@
 (ns ioutil.bytes
-  (:refer-clojure :exclude [bytes? rand-int concat compare read read-line])
+  (:refer-clojure :exclude [rand-int concat compare read read-line])
   (:require [ioutil.bytes.impl :as impl]
             [promesa.core :as p]
             [promesa.exec.csp :as csp]))
@@ -7,7 +7,6 @@
 ;;; impl
 
 (def make-bytes impl/make-bytes)
-(def bytes? impl/bytes?)
 (def btype impl/btype)
 (def bcast impl/bcast)
 (def blength impl/blength)
@@ -241,7 +240,7 @@
       (p/let [b (csp/take chan)]
         (if-not b
           [this nil]
-          (let [data (concat (sub data pos) b)]
+          (let [data (concat [data pos] b)]
             [(->chan-reader data 0 chan) [data 0]]))))))
 
 (defrecord chan-writer [chan ring]

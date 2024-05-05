@@ -5,38 +5,29 @@
 
 (deftest array-test
   (testing "copy"
-    (are [x y] (= (let [a (byte-array 3)] (arr/copy (byte-array x) a) (vec a)) y)
+    (are [x y] (= (let [a (byte-array 3)] (arr/copy! (byte-array x) a) (vec a)) y)
       [1 2 3] [1 2 3]
       [1 2] [1 2 0]
       [1 2 3 4] [1 2 3])
-    (are [x xs y] (= (let [a (byte-array 3)] (arr/copy (byte-array x) xs a 0) (vec a)) y)
+    (are [x xs y] (= (let [a (byte-array 3)] (arr/copy! (byte-array x) xs a 0) (vec a)) y)
       [1 2 3] 1 [2 3 0]
       [1 2 3 4] 1 [2 3 4]
       [1 2 3 4] 0 [1 2 3])
-    (are [x xs n y] (= (let [a (byte-array 3)] (arr/copy (byte-array x) xs a 0 n) (vec a)) y)
+    (are [x xs n y] (= (let [a (byte-array 3)] (arr/copy! (byte-array x) xs a 0 n) (vec a)) y)
       [1 2 3] 0 2 [1 2 0]
       [1 2 3] 1 2 [2 3 0])
-    (are [x y] (= (let [xx (byte-array x) a (byte-array [1 2 3])] (arr/copy a xx) (vec xx)) y)
+    (are [x y] (= (let [xx (byte-array x) a (byte-array [1 2 3])] (arr/copy! a xx) (vec xx)) y)
       0 []
       1 [1]
       2 [1 2]
       3 [1 2 3]
       4 [1 2 3 0])
-    (are [x xs y] (= (let [xx (byte-array x) a (byte-array [1 2 3])] (arr/copy a 0 xx xs) (vec xx)) y)
+    (are [x xs y] (= (let [xx (byte-array x) a (byte-array [1 2 3])] (arr/copy! a 0 xx xs) (vec xx)) y)
       1 1 [0]
       2 1 [0 1]
       3 1 [0 1 2]
       4 1 [0 1 2 3]
       5 1 [0 1 2 3 0]))
-  (testing "fill"
-    (are [v x] (= (vec (arr/fill (byte-array 3) (byte v))) x)
-      1 [1 1 1]
-      2 [2 2 2])
-    (are [s v x] (= (vec (arr/fill (byte-array 3) s (byte v))) x)
-      0 1 [1 1 1]
-      1 1 [0 1 1]
-      2 1 [0 0 1]
-      3 1 [0 0 0]))
   (testing "sub"
     (are [x y] (= (vec (arr/sub (byte-array x))) y)
       [] []

@@ -297,3 +297,23 @@
   (let [[n offsets masks] args]
     (p/do
       (b/write writer (b/bits->bytes it offsets n)))))
+
+;;; tests
+
+(comment
+  (do
+    (def http-header
+      [:conj
+       crlf-line
+       [:map [#(->> (butlast %)
+                    (map (fn [it] (str/split it #"\s*:\s*" 2)))
+                    (into {}))
+              #(-> (map (fn [[k v]] (str k \: \space v)) %)
+                    (concat [""]))]
+        [:take #(= (last %) "")
+         crlf-line]]])
+    (-> @(struct->bytes ["GET / HTTP/1.1" {"Test" "hello"}] http-header)
+        b/bytes->str
+        prn)
+    (-> @(bytes->struct (b/str->bytes "HTTP/1.1 200 OK]\r\nTest: hello\r\n\r\n") http-header)
+        prn)))
