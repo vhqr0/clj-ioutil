@@ -12,7 +12,7 @@
         256 [1 0]
         65535 [255 255]
         65534 [255 254])
-      (are [x y] (= @(st/bytes->struct (b/make-bytes x) short1) [y])
+      (are [x y] (= @(st/bytes->struct (b/bmake x) short1) [y])
         [0 255] 255
         [1 0] 256
         [255 255] 65535
@@ -24,7 +24,7 @@
         [1 0] [1 0]
         [255 255] [255 255]
         [255 254] [255 254])
-      (are [x y] (= @(st/bytes->struct (b/make-bytes x) bytes2) y)
+      (are [x y] (= @(st/bytes->struct (b/bmake x) bytes2) y)
         [0 255] [0 255]
         [1 0] [1 0]
         [255 255] [255 255]
@@ -37,7 +37,7 @@
         256 [1 0]
         65535 [255 255]
         65534 [255 254])
-      (are [x y] (= @(st/bytes->struct (b/make-bytes x) uint16) y)
+      (are [x y] (= @(st/bytes->struct (b/bmake x) uint16) y)
         [0 255] 255
         [1 0] 256
         [255 255] 65535
@@ -48,7 +48,7 @@
       (are [x y] (= (b/bseq-unsigned @(st/struct->bytes x bits224)) y)
         [0x2 0x1 0x6] [0x96]
         [0x1 0x2 0x9] [0x69])
-      (are [x y] (= @(st/bytes->struct (b/make-bytes x) bits224) y)
+      (are [x y] (= @(st/bytes->struct (b/bmake x) bits224) y)
         [0x96] [0x2 0x1 0x6]
         [0x69] [0x1 0x2 0x9])))
   (testing "line"

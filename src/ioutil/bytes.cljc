@@ -6,9 +6,8 @@
 
 ;;; impl
 
-(def make-bytes impl/make-bytes)
+(def bmake impl/bmake)
 (def btype impl/btype)
-(def bcast impl/bcast)
 (def blength impl/blength)
 (def bempty? impl/bempty?)
 (def bget impl/bget)
@@ -199,7 +198,7 @@
   (-detach [this]
     (let [{:keys [ring]} this]
       (if (empty? ring)
-        (make-bytes 0)
+        (bmake 0)
         (first ring))))
   IBytesWriter
   (-write [this b]
@@ -210,7 +209,7 @@
       (->writer [(apply concat ring)]))))
 
 (defn make-reader
-  ([] (make-reader (make-bytes 0)))
+  ([] (make-reader (bmake 0)))
   ([data] (make-reader data 0))
   ([data pos] (->reader data pos)))
 
@@ -265,7 +264,7 @@
             (p/rejected (want-write-error))))))))
 
 (defn make-chan-reader [chan]
-  (->chan-reader (make-bytes 0) 0 chan))
+  (->chan-reader (bmake 0) 0 chan))
 
 (defn make-chan-writer [chan]
   (->chan-writer chan []))
