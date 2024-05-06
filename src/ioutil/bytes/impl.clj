@@ -43,7 +43,7 @@
    (Arrays/copyOfRange (bytes b) (int s) (int e))))
 
 (defn sub
-  "Sub array, impure (reuse origin array if possible)."
+  "Sub bytes, impure (reuse origin bytes if possible)."
   ([b]
    (if-not (instance? ByteBuffer b)
      b
@@ -107,21 +107,21 @@
          (remove #(zero? (% 3))))))
 
 (defn pure-concat
-  "Concat array, pure (always return new array)."
+  "Concat bytes, pure (always return new bytes)."
   [& bs] (apply pure-concat-1 (concat-> bs)))
 
 (defn concat
-  "Concat array, impure (reuse origin array if possible)."
+  "Concat bytes, impure (reuse origin bytes if possible)."
   [& bs] (apply concat-1 (concat-> bs)))
 
 (defn equals?
-  "Test equiv of arrays x and y."
+  "Test equiv of bytes x and y."
   ([x y] (Arrays/equals (bytes x) (bytes y)))
   ([x xs y ys] (equals? x xs (blength x) y ys (blength y)))
   ([x xs xe y ys ye] (Arrays/equals (bytes x) (int xs) (int xe) (bytes y) (int ys) (int ye))))
 
 (defn compare
-  "Compare arrays x and y."
+  "Compare bytes x and y."
   ([x y] (Arrays/compare (bytes x) (bytes y)))
   ([x xs y ys] (compare x xs (blength x) y ys (blength y)))
   ([x xs xe y ys ye] (Arrays/compare (bytes x) (int xs) (int xe) (bytes y) (int ys) (int ye))))
