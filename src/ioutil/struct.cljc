@@ -1,6 +1,5 @@
 (ns ioutil.struct
-  (:require [clojure.string :as str]
-            [promesa.core :as p]
+  (:require [promesa.core :as p]
             [ioutil.bytes :as b]
             [ioutil.bytes.util :as u]))
 
@@ -53,13 +52,13 @@
 (defn struct->bytes [it spec]
   (let [writer (b/make-writer)]
     (p/let [writer (write-struct writer spec it)
-            writer (b/write writer)]
+            writer (b/flush writer)]
       (b/detach writer))))
 
 (defn many-struct->bytes [them spec]
   (let [writer (b/make-writer)]
     (p/let [writer (write-many-struct writer spec them)
-            writer (b/write writer)]
+            writer (b/flush writer)]
       (b/detach writer))))
 
 ;;; assert
@@ -267,14 +266,8 @@
     (apply b/read-line reader args)))
 
 (defmethod write-struct-by-type :line [writer type args it]
-  (let [[& {:keys [end keepend charset] :or {end "\r\n" keepend false}}] args]
-    (p/do
-      (when keepend
-        (assert (str/ends-with? it end)))
-      (let [it (if keepend it (str it end))]
-        (b/write writer (if-not charset
-                          (b/str->bytes it)
-                          (b/str->bytes it charset)))))))
+  (p/do
+    (apply b/write-line writer it args)))
 
 (def crlf-line :line)
 (def cr-line [:line :end "\r"])
@@ -306,7 +299,7 @@
       [:conj
        crlf-line
        [:map [#(->> (butlast %)
-                    (map (fn [it] (str/split it #"\s*:\s*" 2)))
+                    (map (fn [it] (clojure.string/split it #"\s*:\s*" 2)))
                     (into {}))
               #(-> (map (fn [[k v]] (str k \: \space v)) %)
                     (concat [""]))]

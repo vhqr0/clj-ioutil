@@ -1,5 +1,5 @@
 (ns ioutil.bytes
-  (:refer-clojure :exclude [rand-int concat compare read read-line])
+  (:refer-clojure :exclude [rand-int concat compare read read-line flush])
   (:require [ioutil.bytes.impl :as impl]
             [promesa.core :as p]
             [promesa.exec.csp :as csp]))
@@ -66,10 +66,12 @@
     new reader, and (data, pos) or nil if no more bytes to peek."))
 
 (defprotocol IBytesWriter
-  (-write [this b]
-    "Write bytes to buffer, return p/let-able new writer.")
+  (-shutdown [this]
+    "Shutdown writing, return p/let-able new writer.")
   (-flush [this]
-    "Flush buffered bytes, return p/let-able new writer."))
+    "Flush buffered bytes, return p/let-able new writer.")
+  (-write [this b]
+    "Write bytes to buffer, return p/let-able new writer."))
 
 ;;; utils
 
@@ -126,25 +128,6 @@
         [reader (apply concat bs)]
         (p/recur reader (conj bs b))))))
 
-(defn read-line
-  ([reader & {:keys [end keepend charset]
-              :or {end "\r\n" keepend false}}]
-   (let [end (if-not (string? end)
-               end
-               (if-not charset
-                 (str->bytes end)
-                 (str->bytes end charset)))]
-     (letfn [(pred [data pos]
-               (when-let [i (index-of data end pos)]
-                 [data pos i]))]
-       (p/let [[reader [data pos i]] (peek-until reader pred)]
-         (let [j (+ i (blength end))]
-           [(-seek reader j)
-            (let [b (sub data pos (if-not keepend i j))]
-              (if-not charset
-                (bytes->str b)
-                (bytes->str b charset)))]))))))
-
 (defn read-eof [reader]
   (let [[data pos] (-peek reader)]
     (if (< pos (blength data))
@@ -152,18 +135,48 @@
       (p/let [[reader r] (-peek-more reader)]
         [reader (nil? r)]))))
 
-(defn write
-  ([writer] (-flush writer))
-  ([writer b]
-   (if (bempty? b)
-     writer
-     (-write writer b))))
+(defn read-line
+  [reader & {:keys [end charset] :or {end "\r\n"}}]
+  (let [end (if-not (string? end)
+              end
+              (if-not charset
+                (str->bytes end)
+                (str->bytes end charset)))]
+    (letfn [(pred [data pos]
+              (when-let [i (index-of data end pos)]
+                [data pos i]))]
+      (p/let [[reader [data pos i]] (peek-until reader pred)]
+        [(-seek reader (+ i (blength end)))
+         (let [b (sub data pos i)]
+           (if-not charset
+             (bytes->str b)
+             (bytes->str b charset)))]))))
+
+(defn shutdown [writer]
+  (-shutdown writer))
+
+(defn flush [writer]
+  (-flush writer))
+
+(defn write [writer b]
+  (if (bempty? b)
+    writer
+    (-write writer b)))
+
+(defn write-line
+  [writer line & {:keys [end charset] :or {end "\r\n"}}]
+  (let [line (str line end)
+        b (if-not charset
+            (str->bytes line)
+            (str->bytes line charset))]
+    (write writer b)))
 
 ;;; bytes
 
 (extend-type @#'btype
   IDetachable
-  (-detach [this] this)
+  (-detach [this]
+    this)
   IBytesReader
   (-peek [this]
     [this 0])
@@ -172,10 +185,12 @@
   (-peek-more [this]
     [this nil])
   IBytesWriter
-  (-write [this b]
-    (concat this b))
+  (-shutdown [this]
+    this)
   (-flush [this]
-    this))
+    this)
+  (-write [this b]
+    (concat this b)))
 
 ;;; buffer
 
@@ -201,21 +216,23 @@
         (bmake 0)
         (first ring))))
   IBytesWriter
-  (-write [this b]
+  (-shutdown [this]
     (let [{:keys [ring]} this]
-      (->writer (conj ring b))))
+      (if (empty? ring)
+        (->writer [])
+        (->writer [(first ring)]))))
   (-flush [this]
     (let [{:keys [ring]} this]
-      (->writer [(apply concat ring)]))))
+      (->writer [(apply concat ring)])))
+  (-write [this b]
+    (let [{:keys [ring]} this]
+      (->writer (conj ring b)))))
 
-(defn make-reader
-  ([] (make-reader (bmake 0)))
-  ([data] (make-reader data 0))
-  ([data pos] (->reader data pos)))
+(defn make-reader [data]
+  (->reader data 0))
 
-(defn make-writer
-  ([] (->writer []))
-  ([data] (->writer [data])))
+(defn make-writer []
+  (->writer []))
 
 ;;; chan
 
@@ -250,9 +267,10 @@
   (-close [this]
     (csp/close! (:chan this)))
   IBytesWriter
-  (-write [this b]
-    (let [{:keys [chan ring]} this]
-      (->chan-writer chan (conj ring b))))
+  (-shutdown [this]
+    (let [{:keys [chan]} this]
+      (csp/close! chan)
+      (->chan-writer chan [])))
   (-flush [this]
     (let [{:keys [chan ring]} this
           b (apply concat ring)]
@@ -261,7 +279,10 @@
         (p/let [ok (csp/put chan b)]
           (if ok
             (->chan-writer chan [])
-            (p/rejected (want-write-error))))))))
+            (p/rejected (want-write-error)))))))
+  (-write [this b]
+    (let [{:keys [chan ring]} this]
+      (->chan-writer chan (conj ring b)))))
 
 (defn make-chan-reader [chan]
   (->chan-reader (bmake 0) 0 chan))
@@ -272,11 +293,17 @@
 ;;; stream
 
 (defrecord stream [resource close-chan in-chan out-chan]
+  IDetachable
+  (-detach [this]
+    (:resource this))
   ICloseable
   (-close [this]
     (csp/close! (:close-chan this))))
 
 (defrecord error-stream [resource close-chan in-chan out-chan err-chan]
+  IDetachable
+  (-detach [this]
+    (:resource this))
   ICloseable
   (-close [this]
     (csp/close! (:close-chan this))))

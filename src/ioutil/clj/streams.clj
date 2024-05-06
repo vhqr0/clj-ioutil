@@ -160,7 +160,7 @@
     (def s @(make-file-write-stream f))
     @(p/let [w (b/make-stream-writer s)
              w (b/write w (b/str->bytes "hello\n"))]
-       (b/write w))))
+       (b/flush w))))
 
 ;;; process
 
@@ -207,7 +207,16 @@
     (def s @(make-process-stream "ls"))
     @(p/let [r (b/make-stream-reader s)
              [r it] (b/read-all r)]
-       (println (b/bytes->str it)))))
+       (println (b/bytes->str it))))
+  (do
+    (def s @(make-process-stream "cat"))
+    @(p/let [w (b/make-stream-writer s)
+             w (b/write-line w "hello")
+             w (b/flush w)]
+       (b/shutdown w))
+    @(p/let [r (b/make-stream-reader s)
+             [r it] (b/read-line r)]
+       (println it))))
 
 ;;; address
 
@@ -349,7 +358,7 @@
     (def s @(make-socket-stream [h 80]))
     @(p/let [w (b/make-stream-writer s)
              w (b/write w (b/str->bytes (str "GET / HTTP/1.1\r\nHost: " h "\r\n\r\n")))]
-       (b/write w))
+       (b/flush w))
     @(p/let [r (b/make-stream-reader s)
              [r it] (b/read r)]
        (println (b/bytes->str it)))))
