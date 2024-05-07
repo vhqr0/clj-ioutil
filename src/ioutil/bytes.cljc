@@ -174,7 +174,8 @@
 ;;; bytes
 
 (comment
-  (extend-type @#'btype
+  (extend-type #?(:clj (Class/forName "[B")
+                  :cljs js/ArrayBuffer)
     IDetachable
     (-detach [this]
       this)

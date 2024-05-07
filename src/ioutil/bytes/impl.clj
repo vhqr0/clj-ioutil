@@ -354,7 +354,7 @@
 
 (defn bytes->uuid
   "Convert bytes to uuid."
-  [^bytes b] {:pos [(= (alength b) 16)]}
+  [^bytes b]
   (let [bb (ByteBuffer/wrap b)
         l (.getLong bb)
         r (.getLong bb)]

@@ -1,7 +1,9 @@
 (ns ioutil.bytes.impl
   (:refer-clojure :exclude [rand-int concat compare])
-  (:require [clojure.core :as c]
-            [ioutil.bytes.util :as u]))
+  (:require [cljs.core :as c]
+            [clojure.string :as str]
+            [ioutil.bytes.util :as u]
+            [goog.crypt.base64 :as b64]))
 
 (def btype js/ArrayBuffer)
 
@@ -134,11 +136,28 @@
 
 ;;; codec
 
-;; TODO
-(def bytes->hex nil)
-(def hex->bytes nil)
-(def bytes->base64 nil)
-(def base64->bytes nil)
+(defn bytes->hex [b]
+  (->> (bseq-unsigned b)
+       (map #(.padStart (.toString % 16) 2 0))
+       (apply str)))
+
+(defn hex->bytes [s]
+  (->> (partition 2 s)
+       (map #(js/parseInt (apply str %) 16))
+       bmake))
+
+(def base64-alphabet
+  {:default b64/Alphabet.DEFAULT
+   :url     b64/Alphabet.WEBSAFE})
+
+(defn bytes->base64
+  ([b] (b64/encodeByteArray (js/Uint8Array. b)))
+  ([b encoder] (b64/encodeByteArray (js/Uint8Array. b) (base64-alphabet encoder))))
+
+(defn base64->bytes
+  ([s] (.-buffer (b64/decodeStringToUint8Array s)))
+  ;; ignore decoder
+  ([s decoder] (base64->bytes s)))
 
 ;;; num
 
@@ -204,9 +223,17 @@
 
 (def str->uuid uuid)
 
-;; TODO
-(def bytes->uuid nil)
-(def uuid->bytes nil)
+(defn bytes->uuid [b]
+  (->> [[0 4] [4 6] [6 8] [8 10] [10 16]]
+       (map #(bytes->hex (apply sub b %)))
+       (interpose \-)
+       (apply str)
+       str->uuid))
+
+(defn uuid->bytes [u]
+  (->> (str/split (str u) #"-")
+       (map hex->bytes)
+       (apply concat)))
 
 ;;; bits
 
