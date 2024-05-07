@@ -1,7 +1,6 @@
 (ns ioutil.bytes.impl
   (:refer-clojure :exclude [rand-int concat compare])
-  (:require [clojure.core :as c]
-            [ioutil.bytes.util :as u])
+  (:require [ioutil.bytes.util :as u])
   (:import java.nio.ByteBuffer
            java.nio.charset.Charset
            java.util.Arrays
@@ -10,8 +9,8 @@
            java.util.HexFormat
            [java.util Base64 Base64$Encoder Base64$Decoder]))
 
-(def bmake byte-array)
 (def btype (Class/forName "[B"))
+(def bmake byte-array)
 
 (defn blength [b] (alength (bytes b)))
 (defn bempty? [b] (zero? (alength (bytes b))))
@@ -231,8 +230,7 @@
   "Parse int string."
   ([^String s]
    (Long/parseLong s))
-  ([^String s & {:keys [radix unsigned]
-                 :or {unsigned false}}]
+  ([^String s & {:keys [radix unsigned] :or {unsigned false}}]
    (if-not unsigned
      (if-not radix
        (Long/parseLong s)
@@ -302,8 +300,7 @@
      2 (.getShort (ByteBuffer/wrap b))
      4 (.getInt   (ByteBuffer/wrap b))
      8 (.getLong  (ByteBuffer/wrap b))))
-  ([^bytes b & {:keys [little unsigned]
-                :or {little false unsigned false}}]
+  ([^bytes b & {:keys [little unsigned] :or {little false unsigned false}}]
    (let [b (if-not little
              b
              (bmake (reverse b)))]
@@ -321,8 +318,7 @@
      Long    (let [b (bmake 8)] (.putLong  (ByteBuffer/wrap b) i) b)))
   ([i n]
    (int->bytes (cast-int i n)))
-  ([i n & {:keys [little unsigned]
-           :or {little false unsigned false}}]
+  ([i n & {:keys [little unsigned] :or {little false unsigned false}}]
    (let [b (if-not unsigned
              (int->bytes i n)
              (-> (uint->int i n) int->bytes))]
@@ -332,10 +328,15 @@
 
 (defn bytes->float
   "Convert bytes to float."
-  [^bytes b]
-  (case (long (blength b))
-    4 (.getFloat  (ByteBuffer/wrap b))
-    8 (.getDouble (ByteBuffer/wrap b))))
+  ([^bytes b]
+   (case (long (blength b))
+     4 (.getFloat  (ByteBuffer/wrap b))
+     8 (.getDouble (ByteBuffer/wrap b))))
+  ([^bytes b & {:keys [little] :or {little false}}]
+   (let [b (if-not little
+             b
+             (bmake (reverse b)))]
+     (bytes->float b))))
 
 (defn float->bytes
   "Convert n bytes float to bytes."
@@ -344,7 +345,12 @@
      Float  (let [b (bmake 4)] (.putFloat  (ByteBuffer/wrap b) f) b)
      Double (let [b (bmake 8)] (.putDouble (ByteBuffer/wrap b) f) b)))
   ([f n]
-   (cast-float f n)))
+   (float->bytes (cast-float f n)))
+  ([f n & {:keys [little] :or {little false}}]
+   (let [b (float->bytes f n)]
+     (if-not little
+       b
+       (bmake (reverse b))))))
 
 (defn bytes->uuid
   "Convert bytes to uuid."

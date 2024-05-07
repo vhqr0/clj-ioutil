@@ -1,13 +1,13 @@
 (ns ioutil.bytes
-  (:refer-clojure :exclude [rand-int concat compare read read-line flush])
+  (:refer-clojure :exclude [rand-int concat compare read read-line flush -peek -flush -write])
   (:require [ioutil.bytes.impl :as impl]
             [promesa.core :as p]
             [promesa.exec.csp :as csp]))
 
 ;;; impl
 
-(def bmake impl/bmake)
 (def btype impl/btype)
+(def bmake impl/bmake)
 (def blength impl/blength)
 (def bempty? impl/bempty?)
 (def bget impl/bget)
@@ -173,28 +173,31 @@
 
 ;;; bytes
 
-(extend-type @#'btype
-  IDetachable
-  (-detach [this]
-    this)
-  IBytesReader
-  (-peek [this]
-    [this 0])
-  (-seek [this pos]
-    (sub this pos))
-  (-peek-more [this]
-    [this nil])
-  IBytesWriter
-  (-shutdown [this]
-    this)
-  (-flush [this]
-    this)
-  (-write [this b]
-    (concat this b)))
+(comment
+  (extend-type @#'btype
+    IDetachable
+    (-detach [this]
+      this)
+    IBytesReader
+    (-peek [this]
+      [this 0])
+    (-seek [this pos]
+      (sub this pos))
+    (-peek-more [this]
+      [this nil])
+    IBytesWriter
+    (-shutdown [this]
+      this)
+    (-flush [this]
+      this)
+    (-write [this b]
+      (concat this b))))
 
 ;;; buffer
 
-(defrecord reader [data pos]
+(defrecord reader [data pos])
+
+(extend-type reader
   IDetachable
   (-detach [this]
     (let [{:keys [data pos]} this]
@@ -208,7 +211,9 @@
   (-peek-more [this]
     [this nil]))
 
-(defrecord writer [ring]
+(defrecord writer [ring])
+
+(extend-type writer
   IDetachable
   (-detach [this]
     (let [{:keys [ring]} this]
@@ -236,7 +241,9 @@
 
 ;;; chan
 
-(defrecord chan-reader [data pos chan]
+(defrecord chan-reader [data pos chan])
+
+(extend-type chan-reader
   IDetachable
   (-detach [this]
     (let [{:keys [data pos chan]} this]
@@ -259,7 +266,9 @@
           (let [data (concat [data pos] b)]
             [(->chan-reader data 0 chan) [data 0]]))))))
 
-(defrecord chan-writer [chan ring]
+(defrecord chan-writer [chan ring])
+
+(extend-type chan-writer
   IDetachable
   (-detach [this]
     (:chan this))

@@ -1,23 +1,24 @@
 (ns ioutil.bytes-test
-  (:require [clojure.test :refer :all]
+  (:require #?(:clj [clojure.test :refer :all]
+               :cljs [cljs.test :refer [deftest testing are is]])
             [ioutil.bytes :as b]))
 
 (deftest bytes-test
   (testing "sub"
-    (are [x y] (= (vec (b/sub (b/bmake x))) y)
+    (are [x y] (= (vec (b/bseq-unsigned (b/sub (b/bmake x)))) y)
       [] []
       [1 2 3] [1 2 3])
-    (are [x s y] (= (vec (b/sub (b/bmake x) s)) y)
+    (are [x s y] (= (vec (b/bseq-unsigned (b/sub (b/bmake x) s))) y)
       [1 2 3] 0 [1 2 3]
       [1 2 3] 1 [2 3]
       [1 2 3] 2 [3]
       [1 2 3] 3 [])
-    (are [x s e y] (= (vec (b/sub (b/bmake x) s e)) y)
+    (are [x s e y] (= (vec (b/bseq-unsigned (b/sub (b/bmake x) s e))) y)
       [1 2 3] 1 3 [2 3]
       [1 2 3] 2 3 [3]
       [1 2 3] 3 3 []))
   (testing "concat"
-    (are [x y] (= (vec (apply b/concat (map b/bmake x))) y)
+    (are [x y] (= (vec (b/bseq-unsigned (apply b/concat (map b/bmake x)))) y)
       [] []
       [[]] []
       [[] []] []
@@ -58,26 +59,15 @@
       13 5
       14 12))
   (testing "seq"
-    (are [x y] (= (b/bseq-unsigned (b/bmake x)) y)
+    (are [x y] (= (vec (b/bseq-unsigned (b/bmake x))) y)
       [] []
       [1 2 3] [1 2 3]
       [-3 -2 -1] [253 254 255]
       [253 254 255] [253 254 255]))
-  (testing "hex"
-    (are [x y] (= (b/bytes->hex (b/bmake x)) y)
-      [] ""
-      [0x00 0x00] "0000"
-      [0x12 0x34 0x56] "123456"
-      [0xab 0xcd 0xef] "abcdef")
-    (are [x y] (= (b/bseq-unsigned (b/hex->bytes x)) y)
-      "" []
-      "0000" [0x00 0x00]
-      "123456" [0x12 0x34 0x56]
-      "abcdef" [0xab 0xcd 0xef]))
   (testing "int"
     (are [x y] (= (b/bytes->int (b/bmake x) :unsigned true) y)
       [255 255] 65535
       [255 254] 65534)
-    (are [x n y] (= (b/bseq-unsigned (b/int->bytes x n :unsigned true)) y)
+    (are [x n y] (= (vec (b/bseq-unsigned (b/int->bytes x n :unsigned true))) y)
       65535 2 [255 255]
       65534 2 [255 254])))

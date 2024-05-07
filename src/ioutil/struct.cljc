@@ -234,7 +234,6 @@
                 (if-not many
                   (struct->bytes it spec)
                   (many-struct->bytes it spec)))]
-
       (assert (= (b/blength b) n))
       (b/write writer b))))
 

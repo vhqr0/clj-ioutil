@@ -1,0 +1,7 @@
+{
+  "name": "clj-ioutil",
+  "version": "0.1.0",
+  "devDependencies": {
+    "shadow-cljs": "^2.28.5"
+  }
+}

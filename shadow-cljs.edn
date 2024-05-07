@@ -1,0 +1,5 @@
+{:lein {:profile "+cljs"}
+ :dev-http {8021 "target/cljstest"}
+ :builds {:test
+          {:target :browser-test
+           :test-dir "target/cljstest"}}}
