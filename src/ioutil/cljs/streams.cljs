@@ -36,7 +36,8 @@
     (js/URLSearchParams. search)))
 
 (defn make-url
-  ([url] (js/URL. url))
+  ([url]
+   (js/URL. url))
   ([protocol hostname
     & {:keys [username password port pathname search hash]}]
    (let [url (js/URL. (str protocol "://" hostname))]
@@ -156,4 +157,69 @@
                 r (b/make-stream-reader s)
                 [r it] (b/read-all r)]
           (reset! res (b/bytes->str it)))
+        (p/catch #(reset! res %)))))
+
+;;; websocket
+
+(defn make-websocket
+  ([url]
+   (js/WebSocket. (make-url url)))
+  ([url protocols]
+   (js/WebSocket. (make-url url) (to-array protocols))))
+
+(def ^:dynamic *websocket-chan-size* 1024)
+
+(defn make-websocket-in-chan
+  ([websocket close-chan]
+   (make-websocket-in-chan websocket close-chan (csp/chan *websocket-chan-size*)))
+  ([websocket close-chan chan]
+   (.addEventListener websocket "message"
+                      (fn [event]
+                        (-> (p/let [ok (csp/put chan (.-data event))]
+                              (assert ok))
+                            (p/catch #(csp/close! close-chan %)))))
+   (.addEventListener websocket "close"
+                      (fn [_]
+                        (csp/close! chan)))
+   (.addEventListener websocket "error"
+                      #(csp/close! close-chan (.-error %)))
+   chan))
+
+(defn make-websocket-out-chan
+  ([websocket close-chan]
+   (make-websocket-out-chan websocket close-chan (csp/chan)))
+  ([websocket close-chan chan]
+   (-> (p/vthread
+        (p/loop [data (csp/take chan)]
+          (if-not data
+            (.close websocket)
+            (.send websocket data))))
+       (p/catch #(csp/close! close-chan %)))
+   chan))
+
+(defn make-websocket-stream [& args]
+  (p/vthread
+   (let [websocket (apply make-websocket args)
+         close-chan (csp/chan)
+         in-chan (make-websocket-in-chan websocket close-chan)
+         out-chan (make-websocket-out-chan websocket close-chan)]
+     (b/->stream websocket close-chan in-chan out-chan))))
+
+(defn websocket-send
+  ([websocket]
+   (csp/close! (:out-chan websocket)))
+  ([websocket data]
+   (p/let [ok (csp/put (:out-chan websocket) data)]
+     (assert ok))))
+
+(defn websocket-recv [websocket]
+  (csp/take (:in-chan websocket)))
+
+(comment
+  (do
+    (def u "wss://echo.websocket.org")
+    (def res (atom nil))
+    (-> (p/let [s (make-websocket-stream u)
+                it (websocket-recv s)]
+          (reset! res it))
         (p/catch #(reset! res %)))))
