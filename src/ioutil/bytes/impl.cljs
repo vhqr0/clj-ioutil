@@ -3,7 +3,7 @@
   (:require [cljs.core :as c]
             [clojure.string :as str]
             [ioutil.bytes.util :as u]
-            [goog.crypt.base64 :as b64]))
+            [goog.crypt.base64 :as base64]))
 
 (def btype js/ArrayBuffer)
 
@@ -147,15 +147,15 @@
        bmake))
 
 (def base64-alphabet
-  {:default b64/Alphabet.DEFAULT
-   :url     b64/Alphabet.WEBSAFE})
+  {:default base64/Alphabet.DEFAULT
+   :url     base64/Alphabet.WEBSAFE})
 
 (defn bytes->base64
-  ([b] (b64/encodeByteArray (js/Uint8Array. b)))
-  ([b encoder] (b64/encodeByteArray (js/Uint8Array. b) (base64-alphabet encoder))))
+  ([b] (base64/encodeByteArray (js/Uint8Array. b)))
+  ([b encoder] (base64/encodeByteArray (js/Uint8Array. b) (base64-alphabet encoder))))
 
 (defn base64->bytes
-  ([s] (.-buffer (b64/decodeStringToUint8Array s)))
+  ([s] (.-buffer (base64/decodeStringToUint8Array s)))
   ;; ignore decoder
   ([s decoder] (base64->bytes s)))
 

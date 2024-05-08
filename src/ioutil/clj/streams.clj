@@ -537,7 +537,7 @@
              nil)
            (onBinary [this websocket data last]
              (try
-               (vswap! bins conj (b/sub data))
+               (vswap! bins conj (bi/pure-sub data))
                (when last
                  (let [ok (csp/put! chan (apply b/concat @bins))]
                    (vreset! bins [])
