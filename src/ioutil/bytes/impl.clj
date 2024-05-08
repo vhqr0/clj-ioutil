@@ -34,7 +34,7 @@
 ;;; array like
 
 ;; Impl notes: pure sub/connect designed for reusable byte array, such
-;; as an input stream buffer; sub/concat also support ArrayBuffer.
+;; as an input stream buffer; sub/concat also support ByteBuffer.
 
 (defn pure-sub
   "Sub bytes, pure (always return new bytes)."

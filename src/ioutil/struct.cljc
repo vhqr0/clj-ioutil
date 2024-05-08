@@ -307,5 +307,5 @@
     (-> @(struct->bytes ["GET / HTTP/1.1" {"Test" "hello"}] http-header)
         b/bytes->str
         prn)
-    (-> @(bytes->struct (b/str->bytes "HTTP/1.1 200 OK]\r\nTest: hello\r\n\r\n") http-header)
+    (-> @(bytes->struct (b/str->bytes "HTTP/1.1 200 OK\r\nTest: hello\r\n\r\n") http-header)
         prn)))
