@@ -2,8 +2,8 @@
   (:refer-clojure :exclude [rand-int concat compare])
   (:require [cljs.core :as c]
             [clojure.string :as str]
-            [ioutil.bytes.util :as u]
-            [goog.crypt.base64 :as base64]))
+            [goog.crypt.base64 :as base64]
+            [ioutil.bytes.util :as u]))
 
 (def btype js/ArrayBuffer)
 
@@ -17,6 +17,8 @@
 
 (def bempty? (comp zero? blength))
 
+;;; getter as int8
+
 (defn bget [b i]
   (aget (js/Int8Array. b) i))
 
@@ -26,6 +28,8 @@
 (defn brseq [b]
   (map (partial bget b) (range (dec (blength b)) -1 -1)))
 
+;;; getter as uint8
+
 (defn bget-unsigned [b i]
   (aget (js/Uint8Array. b) i))
 
@@ -34,6 +38,8 @@
 
 (defn brseq-unsigned [b]
   (map (partial bget-unsigned b) (range (dec (blength b)) -1 -1)))
+
+;;; array like
 
 (defn sub
   ([x] (.slice x))
@@ -88,18 +94,37 @@
   ([h n s] (last-index-of h n s (blength h)))
   ([h n s e] (u/index-of h n s e blength equals? :last true)))
 
-;;; rand
+;;; codec
 
-(defn rand-bytes [n]
-  (bmake (repeatedly n (fn [] (c/rand-int 256)))))
+;; Impl notes: base64 decoder is ignored, goog.crypt.base64 support
+;; mix of all variants.
 
-;;; str
+(defn bytes->hex [b]
+  (->> (bseq-unsigned b)
+       (map #(.padStart (.toString % 16) 2 0))
+       (apply str)))
 
-;; For text charset:
-;;
-;; Unlike `js/TextDecoder`, `js/TextEncoder` with charset is not
-;; standardized (see below), although some browsers support this (
-;; excluding chrome).
+(defn hex->bytes [s]
+  (->> (partition 2 s)
+       (map #(js/parseInt (apply str %) 16))
+       bmake))
+
+(def base64-alphabet
+  {:default base64/Alphabet.DEFAULT
+   :url     base64/Alphabet.WEBSAFE})
+
+(defn bytes->base64
+  ([b] (base64/encodeByteArray (js/Uint8Array. b)))
+  ([b encoder] (base64/encodeByteArray (js/Uint8Array. b) (base64-alphabet encoder))))
+
+(defn base64->bytes
+  ([s] (.-buffer (base64/decodeStringToUint8Array s)))
+  ([s decoder] (base64->bytes s)))
+
+;;; str utils
+
+;; Impl notes: TextEncoder with charset is not a standard, but some
+;; browsers support this (exclude Chrome), see below.
 ;;
 ;; [https://developer.mozilla.org/en-US/docs/Web/API/TextDecoder/encoding]
 ;; [https://developer.mozilla.org/en-US/docs/Web/API/TextEncoder/encoding]
@@ -134,72 +159,37 @@
 (defn str->float [s]
   (js/parseFloat s))
 
-;;; codec
+(def str->uuid uuid)
 
-(defn bytes->hex [b]
-  (->> (bseq-unsigned b)
-       (map #(.padStart (.toString % 16) 2 0))
-       (apply str)))
-
-(defn hex->bytes [s]
-  (->> (partition 2 s)
-       (map #(js/parseInt (apply str %) 16))
-       bmake))
-
-(def base64-alphabet
-  {:default base64/Alphabet.DEFAULT
-   :url     base64/Alphabet.WEBSAFE})
-
-(defn bytes->base64
-  ([b] (base64/encodeByteArray (js/Uint8Array. b)))
-  ([b encoder] (base64/encodeByteArray (js/Uint8Array. b) (base64-alphabet encoder))))
-
-(defn base64->bytes
-  ([s] (.-buffer (base64/decodeStringToUint8Array s)))
-  ;; ignore decoder
-  ([s decoder] (base64->bytes s)))
-
-;;; num
-
-(defn- bytes->sint [b little]
-  (case (blength b)
-    1 (bget b 0)
-    2 (.getInt16 (js/DataView. b) 0 little)
-    4 (.getInt32 (js/DataView. b) 0 little)
-    8 (.getBigInt64 (js/DataView. b) 0 little)))
-
-(defn- bytes->uint [b little]
-  (case (blength b)
-    1 (bget-unsigned b 0)
-    2 (.getUint16 (js/DataView. b) 0 little)
-    4 (.getUint32 (js/DataView. b) 0 little)
-    8 (.getBigUint64 (js/DataView. b) 0 little)))
-
-(defn- sint->bytes [i n little]
-  (case n
-    1 (bmake [i])
-    2 (let [b (bmake n)] (.setInt16 (js/DataView. b) 0 i little) b)
-    4 (let [b (bmake n)] (.setInt32 (js/DataView. b) 0 i little) b)
-    8 (let [b (bmake n)] (.setBigInt64 (js/DataView. b) 0 i little) b)))
-
-(defn- uint->bytes [i n little]
-  (case n
-    1 (bmake [i])
-    2 (let [b (bmake n)] (.setUint16 (js/DataView. b) 0 i little) b)
-    4 (let [b (bmake n)] (.setUint32 (js/DataView. b) 0 i little) b)
-    8 (let [b (bmake n)] (.setBigUint64 (js/DataView. b) 0 i little) b)))
+;;; num utils
 
 (defn bytes->int
   [b & {:keys [little unsigned] :or {little false unsigned false}}]
   (if-not unsigned
-    (bytes->sint b little)
-    (bytes->uint b little)))
+    (case (blength b)
+      1 (bget b 0)
+      2 (.getInt16 (js/DataView. b) 0 little)
+      4 (.getInt32 (js/DataView. b) 0 little)
+      8 (.getBigInt64 (js/DataView. b) 0 little))
+    (case (blength b)
+      1 (bget-unsigned b 0)
+      2 (.getUint16 (js/DataView. b) 0 little)
+      4 (.getUint32 (js/DataView. b) 0 little)
+      8 (.getBigUint64 (js/DataView. b) 0 little))))
 
 (defn int->bytes
   [i n & {:keys [little unsigned] :or {little false unsigned false}}]
   (if-not unsigned
-    (sint->bytes i n little)
-    (uint->bytes i n little)))
+    (case n
+      1 (bmake [i])
+      2 (let [b (bmake n)] (.setInt16 (js/DataView. b) 0 i little) b)
+      4 (let [b (bmake n)] (.setInt32 (js/DataView. b) 0 i little) b)
+      8 (let [b (bmake n)] (.setBigInt64 (js/DataView. b) 0 i little) b))
+    (case n
+      1 (bmake [i])
+      2 (let [b (bmake n)] (.setUint16 (js/DataView. b) 0 i little) b)
+      4 (let [b (bmake n)] (.setUint32 (js/DataView. b) 0 i little) b)
+      8 (let [b (bmake n)] (.setBigUint64 (js/DataView. b) 0 i little) b))))
 
 (defn bytes->float [b & {:keys [little] :or {little false}}]
   (case (blength b)
@@ -210,18 +200,6 @@
   (case n
     4 (let [b (bmake n)] (.setFloat32 (js/DataView. b) 0 f little) b)
     8 (let [b (bmake n)] (.setFloat64 (js/DataView. b) 0 f little) b)))
-
-(defn rand-int [n & opts]
-  (apply bytes->int (rand-bytes n) opts))
-
-(defn rand-float [n & opts]
-  (apply bytes->float (rand-bytes n) opts))
-
-;;; uuid
-
-(def rand-uuid random-uuid)
-
-(def str->uuid uuid)
 
 (defn bytes->uuid [b]
   (->> [[0 4] [4 6] [6 8] [8 10] [10 16]]
@@ -235,7 +213,20 @@
        (map hex->bytes)
        (apply concat)))
 
-;;; bits
+;;; rand
+
+(defn rand-bytes [n]
+  (bmake (repeatedly n #(c/rand-int 256))))
+
+(defn rand-int [n & {:keys [unsigned] :or {unsigned false}}]
+  (bytes->int (rand-bytes n) :unsigned unsigned))
+
+(defn rand-float [n]
+  (bytes->float (rand-bytes n)))
+
+(def rand-uuid random-uuid)
+
+;;; bits utils
 
 (def int->bits u/int->bits)
 (def bits->int u/bits->int)

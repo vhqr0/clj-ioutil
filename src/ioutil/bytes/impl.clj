@@ -15,6 +15,8 @@
 (defn blength [b] (alength (bytes b)))
 (defn bempty? [b] (zero? (alength (bytes b))))
 
+;;; getter as int8
+
 (defn bget [b i] (aget (bytes b) i))
 
 (def bseq seq)
@@ -22,12 +24,17 @@
 (defn brseq [b]
   (map (partial bget b) (range (dec (blength b)) -1 -1)))
 
+;;; getter as uint8
+
 (defn- byte->uint [i] (bit-and 0xff (byte i)))
 (defn bget-unsigned [b i] (byte->uint (aget (bytes b) i)))
 (defn bseq-unsigned [b] (map byte->uint (bseq b)))
 (defn brseq-unsigned [b] (map byte->uint (brseq b)))
 
-;;; array
+;;; array like
+
+;; Impl notes: pure sub/connect designed for reusable byte array, such
+;; as an input stream buffer; sub/concat also support ArrayBuffer.
 
 (defn pure-sub
   "Sub bytes, pure (always return new bytes)."
@@ -58,6 +65,7 @@
      (pure-sub b s e))))
 
 (defn- pure-concat-1
+  "Concat seq of [bytes start end length]."
   ([]
    (bmake 0))
   ([b]
@@ -87,7 +95,10 @@
   ([b & bs]
    (apply pure-concat-1 b bs)))
 
-(defn- concat-> [bs]
+(defn- concat->
+  "Coerce seq of bytes, [bytes [start [end]]] or BytesBuffer to seq
+  of [bytes start end length], remove empty bytes."
+  [bs]
   (letfn [(vector-> [[b s e]]
             (let [s (or s 0)
                   e (or e (blength b))]
@@ -113,17 +124,15 @@
   "Concat bytes, impure (reuse origin bytes if possible)."
   [& bs] (apply concat-1 (concat-> bs)))
 
-(defn equals?
-  "Test equiv of bytes x and y."
-  ([x y] (Arrays/equals (bytes x) (bytes y)))
-  ([x xs y ys] (equals? x xs (blength x) y ys (blength y)))
-  ([x xs xe y ys ye] (Arrays/equals (bytes x) (int xs) (int xe) (bytes y) (int ys) (int ye))))
-
 (defn compare
-  "Compare bytes x and y."
   ([x y] (Arrays/compare (bytes x) (bytes y)))
   ([x xs y ys] (compare x xs (blength x) y ys (blength y)))
   ([x xs xe y ys ye] (Arrays/compare (bytes x) (int xs) (int xe) (bytes y) (int ys) (int ye))))
+
+(defn equals?
+  ([x y] (Arrays/equals (bytes x) (bytes y)))
+  ([x xs y ys] (equals? x xs (blength x) y ys (blength y)))
+  ([x xs xe y ys ye] (Arrays/equals (bytes x) (int xs) (int xe) (bytes y) (int ys) (int ye))))
 
 (defn index-of
   ([h n] (index-of h n 0))
@@ -135,16 +144,104 @@
   ([h n s] (last-index-of h n s (blength h)))
   ([h n s e] (u/index-of h n s e blength equals? :last true)))
 
+;;; codec
+
+;; Impl notes: base64 also support variant :mime; base64
+;; encoder/decoder also support java Base64Encoder/Decoder objects.
+
+(defn bytes->hex
+  [^bytes b] (.formatHex (HexFormat/of) b))
+
+(defn hex->bytes
+  [^String s] (.parseHex (HexFormat/of) s))
+
+(defn- make-base64-encoder [encoder]
+  (if (instance? Base64$Encoder encoder)
+    encoder
+    (case encoder
+      :default (Base64/getEncoder)
+      :url     (Base64/getUrlEncoder)
+      :mime    (Base64/getMimeEncoder))))
+
+(defn- make-base64-decoder [decoder]
+  (if (instance? Base64$Decoder decoder)
+    decoder
+    (case decoder
+      :default (Base64/getDecoder)
+      :url     (Base64/getUrlDecoder)
+      :mime    (Base64/getMimeDecoder))))
+
+(defn bytes->base64
+  ([^bytes b]
+   (bytes->base64 b :default))
+  ([^bytes b encoder]
+   (let [^Base64$Encoder encoder (make-base64-encoder encoder)]
+     (String. (.encode encoder b)))))
+
+(defn base64->bytes
+  ([^String s]
+   (base64->bytes s :default))
+  ([^String s decoder]
+   (let [^Base64$Decoder decoder (make-base64-decoder decoder)]
+     (.decode decoder s))))
+
+;;; str utils
+
+;; Impl notes: charset also support java Charset objects.
+
+(defn bytes->str
+  ([^bytes b]
+   (String. b))
+  ([^bytes b charset]
+   (if (instance? Charset charset)
+     (String. b ^Charset charset)
+     (String. b ^String charset))))
+
+(defn str->bytes
+  ([^String s]
+   (.getBytes s))
+  ([^String s charset]
+   (if (instance? Charset charset)
+     (.getBytes s ^Charset charset)
+     (.getBytes s ^String charset))))
+
+(defn str->int
+  ([^String s]
+   (Long/parseLong s))
+  ([^String s & {:keys [radix unsigned] :or {unsigned false}}]
+   (if-not unsigned
+     (if-not radix
+       (Long/parseLong s)
+       (Long/parseLong s radix))
+     (if-not radix
+       (Long/parseUnsignedLong s)
+       (Long/parseUnsignedLong s radix)))))
+
+(defn str->float [^String s]
+  (Double/parseDouble s))
+
+(defn str->uuid [^String s]
+  (UUID/fromString s))
+
 ;;; num utils
 
-(defn cast-int [i n]
+;; Impl notes: supported signed int length are 1, 2, 4 and 8;
+;; supported unsigned int length are 1, 2 and 4; supported float
+;; length are 4 and 8; int/float->bytes support type awared 1 arg;
+;; return of bytes->int/float is type awared.
+
+(defn cast-int
+  "Cast any length int to n bytes int."
+  [i n]
   (case (long n)
     1 (byte  i)
     2 (short i)
     4 (int   i)
     8 (long  i)))
 
-(defn cast-float [f n]
+(defn cast-float
+  "Cast any length float to n bytes float."
+  [f n]
   (case (long n)
     4 (float  n)
     8 (double n)))
@@ -167,133 +264,7 @@
     2 (unchecked-short i)
     4 (unchecked-int   i)))
 
-;;; rand
-
-(def ^:dynamic ^Random *random* (Random.))
-
-(defn rand-bytes
-  "Get random n bytes."
-  [n]
-  (let [b (bmake n)]
-    (.nextBytes *random* b) b))
-
-(defn rand-int
-  "Get random n bytes int."
-  ([]
-   (.nextLong *random*))
-  ([n]
-   (case (long n)
-     1 (unchecked-byte (rand-int))
-     2 (unchecked-short (rand-int))
-     4 (.nextInt *random*)
-     8 (.nextLong *random*)))
-  ([n & {:keys [unsigned]
-         :or {unsigned false}}]
-   (if-not unsigned
-     (rand-int n)
-     (-> (rand-int n) int->uint))))
-
-(defn rand-float
-  "Get random n bytes float."
-  ([]
-   (.nextDouble *random*))
-  ([n]
-   (case (long n)
-     4 (.nextFloat *random*)
-     8 (.nextDouble *random*))))
-
-(defn rand-uuid
-  "Get random uuid."
-  [] (UUID/randomUUID))
-
-;;; str
-
-(defn bytes->str
-  "Decode bytes to string."
-  ([^bytes b]
-   (String. b))
-  ([^bytes b charset]
-   (if (instance? Charset charset)
-     (String. b ^Charset charset)
-     (String. b ^String charset))))
-
-(defn str->bytes
-  "Encode string to bytes."
-  ([^String s]
-   (.getBytes s))
-  ([^String s charset]
-   (if (instance? Charset charset)
-     (.getBytes s ^Charset charset)
-     (.getBytes s ^String charset))))
-
-(defn str->int
-  "Parse int string."
-  ([^String s]
-   (Long/parseLong s))
-  ([^String s & {:keys [radix unsigned] :or {unsigned false}}]
-   (if-not unsigned
-     (if-not radix
-       (Long/parseLong s)
-       (Long/parseLong s radix))
-     (if-not radix
-       (Long/parseUnsignedLong s)
-       (Long/parseUnsignedLong s radix)))))
-
-(defn str->float
-  "Parse float string."
-  [^String s] (Double/parseDouble s))
-
-(defn str->uuid
-  "Parse uuid string."
-  [^String s] (UUID/fromString s))
-
-;;; codec
-
-(defn bytes->hex
-  "Convert bytes to hex string."
-  [^bytes b] (.formatHex (HexFormat/of) b))
-
-(defn hex->bytes
-  "Parse hex string."
-  [^String s] (.parseHex (HexFormat/of) s))
-
-(defn- make-base64-encoder [encoder]
-  (if (instance? Base64$Encoder encoder)
-    encoder
-    (case encoder
-      :default (Base64/getEncoder)
-      :url     (Base64/getUrlEncoder)
-      :mime    (Base64/getMimeEncoder))))
-
-(defn- make-base64-decoder [decoder]
-  (if (instance? Base64$Decoder decoder)
-    decoder
-    (case decoder
-      :default (Base64/getDecoder)
-      :url     (Base64/getUrlDecoder)
-      :mime    (Base64/getMimeDecoder))))
-
-(defn bytes->base64
-  "Convert bytes to base64 string.
-  The optional encoder can specify a base64 variant (:default :url :mime)."
-  ([^bytes b]
-   (bytes->base64 b :default))
-  ([^bytes b encoder]
-   (let [^Base64$Encoder encoder (make-base64-encoder encoder)]
-     (bytes->str (.encode encoder b)))))
-
-(defn base64->bytes
-  "Parse base64 string."
-  ([^String s]
-   (base64->bytes s :default))
-  ([^String s decoder]
-   (let [^Base64$Decoder decoder (make-base64-decoder decoder)]
-     (.decode decoder s))))
-
-;;; num
-
 (defn bytes->int
-  "Convert bytes to int."
   ([^bytes b]
    (case (long (blength b))
      1 (bget b 0)
@@ -309,7 +280,6 @@
        (-> (bytes->int b) int->uint)))))
 
 (defn int->bytes
-  "Convert n bytes int to bytes."
   ([i]
    (condp instance? i
      Byte (bmake [i])
@@ -327,7 +297,6 @@
        (bmake (reverse b))))))
 
 (defn bytes->float
-  "Convert bytes to float."
   ([^bytes b]
    (case (long (blength b))
      4 (.getFloat  (ByteBuffer/wrap b))
@@ -339,7 +308,6 @@
      (bytes->float b))))
 
 (defn float->bytes
-  "Convert n bytes float to bytes."
   ([f]
    (condp instance? f
      Float  (let [b (bmake 4)] (.putFloat  (ByteBuffer/wrap b) f) b)
@@ -352,17 +320,13 @@
        b
        (bmake (reverse b))))))
 
-(defn bytes->uuid
-  "Convert bytes to uuid."
-  [^bytes b]
+(defn bytes->uuid [^bytes b]
   (let [bb (ByteBuffer/wrap b)
         l (.getLong bb)
         r (.getLong bb)]
     (UUID. l r)))
 
-(defn uuid->bytes
-  "Convert uuid to bytes."
-  [^UUID u]
+(defn uuid->bytes [^UUID u]
   (let [b (bmake 16)
         bb (ByteBuffer/wrap b)
         l (.getMostSignificantBits u)
@@ -371,7 +335,44 @@
     (.putLong bb r)
     b))
 
-;;; bits
+;;; rand
+
+;; Impl notes: rand-int/float support 0 arg, return long/double by
+;; default.
+
+(def ^:dynamic ^Random *random* (Random.))
+
+(defn rand-bytes [n]
+  (let [b (bmake n)]
+    (.nextBytes *random* b) b))
+
+(defn rand-int
+  ([]
+   (.nextLong *random*))
+  ([n]
+   (case (long n)
+     1 (unchecked-byte (rand-int))
+     2 (unchecked-short (rand-int))
+     4 (.nextInt *random*)
+     8 (.nextLong *random*)))
+  ([n & {:keys [unsigned]
+         :or {unsigned false}}]
+   (if-not unsigned
+     (rand-int n)
+     (-> (rand-int n) int->uint))))
+
+(defn rand-float
+  ([]
+   (.nextDouble *random*))
+  ([n]
+   (case (long n)
+     4 (.nextFloat *random*)
+     8 (.nextDouble *random*))))
+
+(defn rand-uuid []
+  (UUID/randomUUID))
+
+;;; bits utils
 
 (def int->bits u/int->bits)
 (def bits->int u/bits->int)

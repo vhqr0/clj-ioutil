@@ -6,51 +6,232 @@
 
 ;;; impl
 
-(def btype impl/btype)
-(def bmake impl/bmake)
-(def blength impl/blength)
-(def bempty? impl/bempty?)
-(def bget impl/bget)
-(def bseq impl/bseq)
-(def brseq impl/brseq)
-(def bget-unsigned impl/bget-unsigned)
-(def bseq-unsigned impl/bseq-unsigned)
-(def brseq-unsigned impl/brseq-unsigned)
-(def sub impl/sub)
-(def concat impl/concat)
-(def equals? impl/equals?)
-(def compare impl/compare)
-(def index-of impl/index-of)
-(def last-index-of impl/last-index-of)
-(def rand-bytes impl/rand-bytes)
-(def rand-int impl/rand-int)
-(def rand-float impl/rand-float)
-(def rand-uuid impl/rand-uuid)
-(def bytes->str impl/bytes->str)
-(def str->bytes impl/str->bytes)
-(def str->int impl/str->int)
-(def str->float impl/str->float)
-(def str->uuid impl/str->uuid)
-(def bytes->hex impl/bytes->hex)
-(def hex->bytes impl/hex->bytes)
-(def bytes->base64 impl/bytes->base64)
-(def base64->bytes impl/base64->bytes)
-(def bytes->int impl/bytes->int)
-(def int->bytes impl/int->bytes)
-(def bytes->float impl/bytes->float)
-(def float->bytes impl/float->bytes)
-(def bytes->uuid impl/bytes->uuid)
-(def uuid->bytes impl/uuid->bytes)
-(def int->bits impl/int->bits)
-(def bits->int impl/bits->int)
-(def bytes->bits impl/bytes->bits)
-(def bits->bytes impl/bits->bytes)
+(def btype
+  "Type of bytes."
+  impl/btype)
 
-;;; protocols
+(def bmake
+  "[num-or-seq]
+  Make bytes, `byte-array` like."
+  impl/bmake)
+
+(def blength
+  "[b]
+  Get length of bytes, `alength` like."
+  impl/blength)
+
+(def bempty?
+  "[b]
+  Test empty of bytes, `empty` like."
+  impl/bempty?)
+
+;;;; getter as int8 or uint8
+
+(def bget
+  "[b i]
+  Get byte (int8 or uint8, depend on platform) at index of bytes, `aget` like."
+  impl/bget)
+
+(def bseq
+  "[b]
+  Get byte (int8 or uint8, depend on platform) seq of bytes, `seq`like."
+  impl/bseq)
+
+(def brseq
+  "[b]
+  get byte (int8 or uint8, depend on platform) reversed seq of bytes, `rseq` like."
+  impl/brseq)
+
+;;;; getter as uint8
+
+(def bget-unsigned
+  "[b i]
+  Like `bget`, force uint8."
+  impl/bget-unsigned)
+
+(def bseq-unsigned
+  "[b]
+  Like `bseq`, force uint8."
+  impl/bseq-unsigned)
+
+(def brseq-unsigned
+  "[b]
+  Like `brseq`, force uint8."
+  impl/brseq-unsigned)
+
+;;;; array like
+
+(def sub
+  "[b]
+  [b s]
+  [b s e]
+  Sub bytes."
+  impl/sub)
+
+(def concat
+  "[& bs]
+  Concat seq of bytes or [bytes [start [end]]]."
+  impl/concat)
+
+(def compare
+  "[x y]
+  [x xs y ys]
+  [x xs xe y ys ye]
+  Compare bytes."
+  impl/compare)
+
+(def equals?
+  "[x y]
+  [x xs y ys]
+  [x xs xe y ys ye]
+  Test equals of bytes."
+  impl/equals?)
+
+(def index-of
+  "[h n]
+  [h n s]
+  [h n s e]
+  Find needle in haystack."
+  impl/index-of)
+
+(def last-index-of
+  "Reverse version of `index-of`."
+  impl/last-index-of)
+
+;;;; codec
+
+(def bytes->hex
+  "[b]
+  Convert bytes to hex string."
+  impl/bytes->hex)
+
+(def hex->bytes
+  "[s]
+  Parse hex string."
+  impl/hex->bytes)
+
+(def bytes->base64
+  "[b]
+  [b encoder]
+  Convert bytes to base64 string. The optional arg specify a base64
+  variant in keyword, and atleast support :default and :url."
+  impl/bytes->base64)
+
+(def base64->bytes
+  "[s]
+  [s decoder]
+  Parse base64 string. The optional args see `bytes->base64`."
+  impl/base64->bytes)
+
+;;;; str utils
+
+(def bytes->str
+  "[b]
+  [b charset]
+  Decode bytes to string. The optional arg specify charset in string."
+  impl/bytes->str)
+
+(def str->bytes
+  "[s]
+  Encode string to bytes. The optional arg see `bytes->str`."
+  impl/str->bytes)
+
+(def str->int
+  "[s & {:keys [radix unsigned]}]
+  Parse int string."
+  impl/str->int)
+
+(def str->float
+  "[s]
+  Parse float string."
+  impl/str->float)
+
+(def str->uuid
+  "[s]
+  Parse uuid string."
+  impl/str->uuid)
+
+;;;; num utils
+
+(def bytes->int
+  "[b & {:keys [little unsigned]}]
+  Convert bytes to int."
+  impl/bytes->int)
+
+(def int->bytes
+  "[i n & {:keys [little unsigned]}]
+  Convert n bytes int to bytes."
+  impl/int->bytes)
+
+(def bytes->float
+  "[b & {:keys [little]}]
+  Convert bytes to float."
+  impl/bytes->float)
+
+(def float->bytes
+  "[f n & {:keys [little]}]
+  Convert n bytes float to bytes."
+  impl/float->bytes)
+
+(def bytes->uuid
+  "[b]
+  Convert bytes to uuid."
+  impl/bytes->uuid)
+
+(def uuid->bytes
+  "[u]
+  Convert uuid to bytes."
+  impl/uuid->bytes)
+
+;;;; rand
+
+(def rand-bytes
+  "[n]
+  Get random n bytes."
+  impl/rand-bytes)
+
+(def rand-int
+  "[n & {:keys [unsigned]}]
+  Get random n bytes int."
+  impl/rand-int)
+
+(def rand-float
+  "[n]
+  Get random n bytes float."
+  impl/rand-float)
+
+(def rand-uuid
+  "[]
+  Get random uuid."
+  impl/rand-uuid)
+
+;;;; bits utils
+
+(def int->bits
+  "[i offsets masks]
+  Split bits from int."
+  impl/int->bits)
+
+(def bits->int
+  "[bits offsets]
+  Join bits to int."
+  impl/bits->int)
+
+(def bytes->bits
+  "[b offsets masks]
+  Split bits from bytes."
+  impl/bytes->bits)
+
+(def bits->bytes
+  "[bits offsets n]
+  Join bits to bytes."
+  impl/bits->bytes)
+
+;;; io protocols
 
 (defprotocol IDetachable
   (-detach [this]
-    "Detach low level resource from reader/writer."))
+    "Detach low level resource from reader/writer/stream."))
 
 (defprotocol ICloseable
   (-close [this]
@@ -73,7 +254,7 @@
   (-write [this b]
     "Write bytes to buffer, return p/let-able new writer."))
 
-;;; utils
+;;; io utils
 
 (defn want-read-error []
   (ex-info "want read error" {:type ::want-read}))
@@ -171,7 +352,7 @@
             (str->bytes line charset))]
     (write writer b)))
 
-;;; bytes
+;;; bytes io
 
 (comment
   (extend-type #?(:clj (Class/forName "[B")
@@ -194,7 +375,7 @@
     (-write [this b]
       (concat this b))))
 
-;;; buffer
+;;; buffered bytes io
 
 (defrecord reader [data pos])
 
@@ -212,43 +393,41 @@
   (-peek-more [this]
     [this nil]))
 
-(defrecord writer [ring])
+(defrecord writer [data ring])
 
 (extend-type writer
   IDetachable
   (-detach [this]
-    (let [{:keys [ring]} this]
-      (if (empty? ring)
-        (bmake 0)
-        (first ring))))
+    (:data this))
   IBytesWriter
   (-shutdown [this]
-    (let [{:keys [ring]} this]
-      (if (empty? ring)
-        (->writer [])
-        (->writer [(first ring)]))))
+    (->writer (:data this) nil))
   (-flush [this]
-    (let [{:keys [ring]} this]
-      (->writer [(apply concat ring)])))
+    (let [{:keys [data ring]} this]
+      (if (or (not ring) (empty? ring))
+        this
+        (->writer (apply concat data ring) []))))
   (-write [this b]
-    (let [{:keys [ring]} this]
-      (->writer (conj ring b)))))
+    (let [{:keys [data ring]} this]
+      (assert ring)
+      (->writer data (conj ring b)))))
 
-(defn make-reader [data]
-  (->reader data 0))
+(defn make-reader
+  ([] (make-reader (bmake 0)))
+  ([data] (->reader data 0)))
 
-(defn make-writer []
-  (->writer []))
+(defn make-writer
+  ([] (make-writer (bmake 0)))
+  ([data] (->writer data [])))
 
-;;; chan
+;;; chan io
 
 (defrecord chan-reader [data pos chan])
 
 (extend-type chan-reader
   IDetachable
   (-detach [this]
-    (let [{:keys [data pos chan]} this]
-      [(sub data pos) chan]))
+    (:chan this))
   ICloseable
   (-close [this]
     (csp/close! (:chan this)))
@@ -280,18 +459,21 @@
   (-shutdown [this]
     (let [{:keys [chan]} this]
       (csp/close! chan)
-      (->chan-writer chan [])))
+      (->chan-writer chan nil)))
   (-flush [this]
-    (let [{:keys [chan ring]} this
-          b (apply concat ring)]
-      (if (bempty? b)
+    (let [{:keys [chan ring]} this]
+      (if (or (not ring) (empty? ring))
         this
-        (p/let [ok (csp/put chan b)]
-          (if ok
-            (->chan-writer chan [])
-            (p/rejected (want-write-error)))))))
+        (let [b (apply concat ring)]
+          (if (bempty? b)
+            this
+            (p/let [ok (csp/put chan b)]
+              (if ok
+                (->chan-writer chan [])
+                (p/rejected (want-write-error)))))))))
   (-write [this b]
     (let [{:keys [chan ring]} this]
+      (assert ring)
       (->chan-writer chan (conj ring b)))))
 
 (defn make-chan-reader [chan]
