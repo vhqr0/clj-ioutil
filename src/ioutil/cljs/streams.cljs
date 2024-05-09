@@ -193,7 +193,9 @@
         (p/loop [data (csp/take chan)]
           (if-not data
             (.close websocket)
-            (.send websocket data))))
+            (do
+              (.send websocket data)
+              (p/recur (csp/take chan))))))
        (p/catch #(csp/close! close-chan %)))
    chan))
 
@@ -203,6 +205,7 @@
          close-chan (csp/chan)
          in-chan (make-websocket-in-chan websocket close-chan)
          out-chan (make-websocket-out-chan websocket close-chan)]
+     (go-close close-chan [in-chan out-chan] #(.close websocket))
      (b/->stream websocket close-chan in-chan out-chan))))
 
 (defn websocket-send
