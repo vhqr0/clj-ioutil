@@ -136,6 +136,16 @@
   Encode string to bytes. The optional arg see `bytes->str`."
   impl/str->bytes)
 
+(def str->urlencoded
+  "[s]
+  URL encode."
+  impl/str->urlencoded)
+
+(def urlencoded->str
+  "[s]
+  URL decode."
+  impl/urlencoded->str)
+
 (def str->int
   "[s & {:keys [radix unsigned]}]
   Parse int string."

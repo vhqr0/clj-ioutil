@@ -145,6 +145,12 @@
      (assert (= (.-encoding encoder) encoding))
      (.-buffer (.encode encoder s)))))
 
+(defn str->urlencoded [s]
+  (js/encodeURIComponent s))
+
+(defn urlencoded->str [u]
+  (js/decodeURIComponent u))
+
 (defn str->int
   ([s]
    (js/parseInt s))

@@ -7,7 +7,8 @@
            java.util.Random
            java.util.UUID
            java.util.HexFormat
-           [java.util Base64 Base64$Encoder Base64$Decoder]))
+           [java.util Base64 Base64$Encoder Base64$Decoder]
+           [java.net URLEncoder URLDecoder]))
 
 (def btype (Class/forName "[B"))
 (def bmake byte-array)
@@ -187,7 +188,8 @@
 
 ;;; str utils
 
-;; Impl notes: encoding also support java Charset objects.
+;; Impl notes: encoding also support java Charset objects; urlencoded
+;; also support optional encoding.
 
 (defn bytes->str
   ([^bytes b]
@@ -204,6 +206,22 @@
    (if (instance? Charset encoding)
      (.getBytes s ^Charset encoding)
      (.getBytes s ^String encoding))))
+
+(defn str->urlencoded
+  ([s]
+   (str->urlencoded s (Charset/defaultCharset)))
+  ([^String s encoding]
+   (if (instance? Charset encoding)
+     (URLEncoder/encode s ^Charset encoding)
+     (URLEncoder/encode s ^String encoding))))
+
+(defn urlencoded->str
+  ([u]
+   (urlencoded->str u (Charset/defaultCharset)))
+  ([^String u encoding]
+   (if (instance? Charset encoding)
+     (URLDecoder/decode u ^Charset encoding)
+     (URLDecoder/decode u ^String encoding))))
 
 (defn str->int
   ([^String s]
