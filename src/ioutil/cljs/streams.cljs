@@ -70,7 +70,8 @@
 (def http-mode
   {:cors "cors"
    :no-cors "no-cors"
-   :same-oirgin "same-origin"})
+   :same-oirgin "same-origin"
+   :navigate "navigate"})
 
 (def http-credentials
   {:omit "omit"
@@ -90,31 +91,6 @@
    :error "error"
    :manual "manual"})
 
-(defn make-http-headers
-  ([]
-   (js/Headers.))
-  ([headers]
-   (if (map? headers)
-     (js/Headers. (clj->js headers))
-     (js/Headers. headers))))
-
-(defn make-http-request
-  ([url]
-   (js/Request. (make-url url)))
-  ([url & {:keys [method headers body mode credentials
-                  cache redirect referrer integrity]}]
-   (let [opts (cond-> {}
-                method (assoc "method" (http-method method))
-                headers (assoc "headers" (make-http-headers headers))
-                body (assoc "body" body)
-                mode (assoc "mode" (http-mode mode))
-                credentials (assoc "credentials" (http-credentials credentials))
-                cache (assoc "cache" (http-cache cache))
-                redirect (assoc "redirect" (http-redirect redirect))
-                referrer (assoc "referrer" referrer)
-                integrity (assoc "integrity" integrity))]
-     (js/Request. (make-url url) (clj->js opts)))))
-
 (def http-referrer-policy
   {:no-referrer "no-referrer"
    :no-referrer-when-downgrade "no-referrer-when-downgrade"
@@ -129,20 +105,46 @@
    :low "low"
    :auto "auto"})
 
-(defn http-fetch
-  ([request]
-   (js/fetch request))
-  ([request &
-    {:keys [referrer-policy priority keepalive signal]}]
-   (let [opts (cond-> {}
-                referrer-policy (assoc "referrerPolicy" (http-referrer-policy referrer-policy))
-                priority (assoc "priority" (http-prioirty priority))
-                keepalive (assoc "keepalive" keepalive)
-                signal (assoc "signal" signal))]
-     (js/fetch request (clj->js opts)))))
+(defn make-http-headers
+  ([]
+   (js/Headers.))
+  ([headers]
+   (if (map? headers)
+     (js/Headers. (clj->js headers))
+     (js/Headers. headers))))
 
-(defn make-http-reader-stream [request & opts]
-  (p/let [response (apply http-fetch request opts)
+(defn make-http-opts
+  [& {:keys [method headers body mode credentials cache redirect referrer
+             referrer-policy integrity priority keepalive signal]}]
+  (cond-> {}
+    method (assoc "method" (http-method method))
+    headers (assoc "headers" (make-http-headers headers))
+    body (assoc "body" body)
+    mode (assoc "mode" (http-mode mode))
+    credentials (assoc "credentials" (http-credentials credentials))
+    cache (assoc "cache" (http-cache cache))
+    redirect (assoc "redirect" (http-redirect redirect))
+    referrer (assoc "referrer" referrer)
+    referrer-policy (assoc "referrerPolicy" (http-referrer-policy referrer-policy))
+    integrity (assoc "integrity" integrity)
+    priority (assoc "priority" (http-prioirty priority))
+    keepalive (assoc "keepalive" keepalive)
+    signal (assoc "signal" signal)))
+
+(defn make-http-request
+  ([input]
+   (js/Request. input))
+  ([input & opts]
+   (js/Request. input (clj->js (apply make-http-opts opts)))))
+
+(defn http-fetch
+  ([input]
+   (js/fetch input))
+  ([input & opts]
+   (js/fetch input (clj->js (apply make-http-opts opts)))))
+
+(defn make-http-reader-stream [input & opts]
+  (p/let [response (apply http-fetch input opts)
           body (.-body response)
           close-chan (csp/chan)
           in-chan (readable-stream->chan body close-chan)]
@@ -169,7 +171,7 @@
 
 (def ^:dynamic *websocket-chan-size* 1024)
 
-(defn make-websocket-in-chan
+(defn- make-websocket-in-chan
   ([websocket close-chan]
    (make-websocket-in-chan websocket close-chan (csp/chan *websocket-chan-size*)))
   ([websocket close-chan chan]
@@ -185,18 +187,18 @@
                       #(csp/close! close-chan (.-error %)))
    chan))
 
-(defn make-websocket-out-chan
+(defn- make-websocket-out-chan
   ([websocket close-chan]
    (make-websocket-out-chan websocket close-chan (csp/chan)))
   ([websocket close-chan chan]
-   (-> (p/vthread
-        (p/loop [data (csp/take chan)]
+   (p/vthread
+    (-> (p/loop [data (csp/take chan)]
           (if-not data
             (.close websocket)
             (do
               (.send websocket data)
-              (p/recur (csp/take chan))))))
-       (p/catch #(csp/close! close-chan %)))
+              (p/recur (csp/take chan)))))
+        (p/catch #(csp/close! close-chan %))))
    chan))
 
 (defn make-websocket-stream [& args]

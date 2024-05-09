@@ -9,8 +9,8 @@
            [java.io
             InputStream OutputStream File FileDescriptor FileInputStream FileOutputStream]
            [java.net
-            SocketAddress InetAddress InetSocketAddress Socket
-            Proxy Proxy$Type ProxySelector URI Authenticator PasswordAuthentication]
+            SocketAddress InetAddress InetSocketAddress URI Socket
+            Proxy Proxy$Type ProxySelector Authenticator PasswordAuthentication CookieManager]
            javax.net.ssl.SSLSocketFactory
            [java.net.http
             HttpClient HttpClient$Builder HttpClient$Version HttpClient$Redirect
@@ -28,12 +28,12 @@
              (csp/close! chan))
            (callback))))))
 
-(defn make-duration-time [time]
+(defn ^Duration make-duration-time [time]
   (if (instance? Duration time)
     time
     (Duration/ofMillis time)))
 
-(defn make-int-time [time]
+(defn ^long make-int-time [time]
   (if (instance? Duration time)
     (.toMillis ^Duration time)
     time))
@@ -89,7 +89,7 @@
 
 ;;; file
 
-(defn make-file
+(defn ^File make-file
   ([file]
    (if (instance? File file)
      file
@@ -108,7 +108,7 @@
     (println (str (make-file ".gitignore")))
     (println (str (make-file (System/getenv "HOME") "work")))))
 
-(defn make-file-input-stream
+(defn ^InputStream make-file-input-stream
   ([file]
    (if (instance? InputStream file)
      file
@@ -118,7 +118,7 @@
              :else (FileInputStream. ^String file))
        (apply make-file-input-stream file)))))
 
-(defn make-file-output-stream
+(defn ^OutputStream make-file-output-stream
   ([file]
    (if (instance? OutputStream file)
      file
@@ -162,65 +162,9 @@
              w (b/write w (b/str->bytes "hello\n"))]
        (b/flush w))))
 
-;;; process
-
-;; TODO: String/1 type hints
-(defn make-process
-  ([process]
-   (if (instance? Process process)
-     process
-     (if-not (vector? process)
-       (let [^Runtime rt (Runtime/getRuntime)]
-         (if (instance? String process)
-           (.exec rt ^String process)
-           (.exec rt (into-array String process))))
-       (apply make-process process))))
-  ([command env]
-   (let [^Runtime rt (Runtime/getRuntime)]
-     (if (instance? String command)
-       (.exec rt ^String command (into-array String env))
-       (.exec rt (into-array String command) (into-array String env)))))
-  ([command env dir]
-   (let [^Runtime rt (Runtime/getRuntime)]
-     (if (instance? String command)
-       (.exec rt ^String command (into-array String env) ^File (make-file dir))
-       (.exec rt (into-array String command) (into-array String env) ^File (make-file dir))))))
-
-(defn make-process-stream
-  ([^Process process input-stream output-stream error-stream]
-   (let [close-chan (csp/chan)
-         in-chan (input-stream->chan input-stream close-chan)
-         out-chan (output-stream->chan output-stream close-chan)
-         err-chan (output-stream->chan error-stream close-chan)]
-     (go-close close-chan [in-chan out-chan err-chan] #(.destroy process))
-     (b/->error-stream process close-chan in-chan out-chan err-chan)))
-  ([process]
-   (p/vthread
-    (let [^Process process (make-process process)
-          input-stream (.getInputStream process)
-          output-stream (.getOutputStream process)
-          error-stream (.getErrorStream process)]
-      (make-process-stream process input-stream output-stream error-stream)))))
-
-(comment
-  (do
-    (def s @(make-process-stream "ls"))
-    @(p/let [r (b/make-stream-reader s)
-             [r it] (b/read-all r)]
-       (println (b/bytes->str it))))
-  (do
-    (def s @(make-process-stream "cat"))
-    @(p/let [w (b/make-stream-writer s)
-             w (b/write-line w "hello")
-             w (b/flush w)]
-       (b/shutdown w))
-    @(p/let [r (b/make-stream-reader s)
-             [r it] (b/read-line r)]
-       (println it))))
-
 ;;; address
 
-(defn make-address
+(defn ^InetAddress make-address
   ([address]
    (if (instance? InetAddress address)
      address
@@ -236,7 +180,7 @@
     (println (str (make-address "bing.com")))
     (println (str (make-address "127.0.0.1")))))
 
-(defn make-socket-address
+(defn ^SocketAddress make-socket-address
   ([address]
    (if (instance? SocketAddress address)
      address
@@ -253,34 +197,7 @@
     (println (str (make-socket-address 80)))
     (println (str (make-socket-address "bing.com" 80)))))
 
-(def proxy-type
-  {:direct Proxy$Type/DIRECT
-   :http   Proxy$Type/HTTP
-   :socks  Proxy$Type/SOCKS})
-
-(defn make-proxy
-  [proxy host port]
-  (if (= proxy :default)
-    (-> (ProxySelector/getDefault)
-        (.select (URI. "http" "" host port "" "" ""))
-        rand-nth)
-    (let [[type address] proxy]
-      (Proxy. (proxy-type type) (make-socket-address address)))))
-
-(comment
-  (do
-    (println (str (make-proxy :default "bing.com" 80)))
-    (println (str (make-proxy :default "google.com" 80)))
-    (println (str (make-proxy [:socks 1080] "google.com" 80)))))
-
-(defn make-proxy-selector
-  [proxy]
-  (condp = proxy
-    :no-proxy HttpClient$Builder/NO_PROXY
-    :default  (ProxySelector/getDefault)
-    (ProxySelector/of (make-socket-address proxy))))
-
-(defn make-uri
+(defn ^URI make-uri
   ([uri]
    (if (instance? URI uri)
      uri
@@ -296,7 +213,53 @@
     (println (str (make-uri "http://bing.com?s=clojure")))
     (println (str (make-uri "http" :host "bing.com" :query "s=clojure")))))
 
-(defn make-auth
+;;; proxy/auth/cookie
+
+(def proxy-type
+  {:direct Proxy$Type/DIRECT
+   :http   Proxy$Type/HTTP
+   :socks  Proxy$Type/SOCKS})
+
+(defn ^Proxy make-proxy
+  ([proxy]
+   (if (= proxy :direct)
+     Proxy/NO_PROXY
+     (let [[type address] proxy]
+       (Proxy. (proxy-type type) (make-socket-address address)))))
+  ([proxy host port]
+   (if-not (= proxy :default)
+     (make-proxy proxy)
+     (let [^URI uri (URI. "http"  "" host port "" "" "")]
+       (rand-nth (.select (ProxySelector/getDefault) uri))))))
+
+(comment
+  (do
+    (println (str (make-proxy :default "bing.com" 80)))
+    (println (str (make-proxy :default "google.com" 80)))
+    (println (str (make-proxy :direct "bing.com" 80)))
+    (println (str (make-proxy [:socks 1080] "google.com" 80)))
+    (println (str (make-proxy [:http 1080] "google.com" 80)))))
+
+(defn ^ProxySelector make-proxy-selector [proxy]
+  (if (= proxy :default)
+    (ProxySelector/getDefault)
+    (let [proxies (java.util.Arrays/asList (into-array Proxy [(make-proxy proxy)]))]
+      (clojure.core/proxy [ProxySelector] []
+        (select [uri]
+          proxies)))))
+
+(comment
+  (do
+    (defn- f [proxy host]
+      (let [selector (make-proxy-selector proxy)]
+        (rand-nth (.select selector (make-uri "http" :host host)))))
+    (println (f :default "bing.com"))
+    (println (f :default "google.com"))
+    (println (f :direct "bing.com"))
+    (println (f [:socks 1080] "google.com"))
+    (println (f [:http 1080] "google.com"))))
+
+(defn ^Authenticator make-auth
   ([auth]
    (if (instance? Authenticator auth)
      auth
@@ -306,15 +269,19 @@
   ([]
    (Authenticator/getDefault))
   ([^String username ^String password]
-   (proxy [Authenticator] []
-     (getPasswordAuthentication []
-       (PasswordAuthentication. username (.toCharArray password))))))
+   (let [auth (PasswordAuthentication. username (.toCharArray password))]
+     (proxy [Authenticator] []
+       (getPasswordAuthentication []
+         auth)))))
+
+(defn ^CookieManager make-cookie []
+  (CookieManager.))
 
 ;;; socket
 
 (def ^:dynamic *socket-connect-timeout* (Duration/ofSeconds 2))
 
-(defn make-socket
+(defn ^Socket make-socket
   ([socket]
    (if (instance? Socket socket)
      socket
@@ -387,7 +354,7 @@
    :always  HttpClient$Redirect/ALWAYS
    :never   HttpClient$Redirect/NEVER})
 
-(defn make-http-body [body]
+(defn ^HttpRequest$BodyPublisher make-http-body [body]
   (cond (string? body) (HttpRequest$BodyPublishers/ofString body)
         (bytes? body) (HttpRequest$BodyPublishers/ofByteArray body)
         :else (HttpRequest$BodyPublishers/noBody)))
@@ -401,6 +368,9 @@
 (defn- http-client-builder-set-auth [^HttpClient$Builder builder auth]
   (.authenticator builder (make-auth auth)))
 
+(defn- http-client-builder-set-cookie [^HttpClient$Builder builder cookie]
+  (.cookieHandler builder cookie))
+
 (defn- http-client-builder-set-version [^HttpClient$Builder builder version]
   (.version builder (http-version version)))
 
@@ -413,14 +383,15 @@
 (defn- http-client-builder-build [^HttpClient$Builder builder]
   (.build builder))
 
-(defn make-http-client
-  [& {:keys [executor proxy auth version timeout redirect]
+(defn ^HttpClient make-http-client
+  [& {:keys [executor proxy auth cookie version timeout redirect]
       :or {executor pe/default-vthread-executor
            timeout *http-connect-timeout*}}]
   (-> (cond-> (HttpClient/newBuilder)
         executor (http-client-builder-set-executor executor)
         proxy    (http-client-builder-set-proxy proxy)
         auth     (http-client-builder-set-auth auth)
+        cookie   (http-client-builder-set-cookie cookie)
         version  (http-client-builder-set-version version)
         timeout  (http-client-builder-set-timeout timeout)
         redirect (http-client-builder-set-redirect redirect))
@@ -447,7 +418,7 @@
 (defn- http-request-builder-build [^HttpRequest$Builder builder]
   (.build builder))
 
-(defn make-http-request
+(defn ^HttpRequest make-http-request
   [uri & {:keys [method body headers version timeout]
           :or {method :get timeout *http-request-timeout*}}]
   (-> (cond-> (HttpRequest/newBuilder)
@@ -506,18 +477,18 @@
 (defn- websocket-builder-build [^WebSocket$Builder builder uri listener]
   (.buildAsync builder (make-uri uri) listener))
 
-(defn make-websocket
+(defn ^WebSocket make-websocket
   [client uri listener & {:keys [headers subprotocols timeout]
                           :or {timeout *websocket-connect-timeout*}}]
   (-> (cond-> (.newWebSocketBuilder ^HttpClient client)
-        headers (websocket-builder-add-headers headers)
+        headers      (websocket-builder-add-headers headers)
         subprotocols (websocket-builder-set-subprotocols subprotocols)
-        timeout (websocket-builder-set-timeout timeout))
+        timeout      (websocket-builder-set-timeout timeout))
       (websocket-builder-build uri listener)))
 
 (def ^:dynamic *websocket-chan-size* 1024)
 
-(defn make-websocket-in-chan
+(defn- make-websocket-in-chan
   ([close-chan]
    (make-websocket-in-chan close-chan (csp/chan :buf *websocket-chan-size*)))
   ([close-chan chan]
@@ -526,34 +497,31 @@
          listener
          (reify WebSocket$Listener
            (onText [this websocket data last]
-             (try
-               (vswap! texts conj (str data))
-               (when last
-                 (let [ok (csp/put! chan (apply str @texts))]
-                   (vreset! texts [])
-                   (assert ok)))
-               (catch Exception err
-                 (csp/close! close-chan err)))
+             (vswap! texts conj (str data))
+             (when last
+               (let [text (apply str @texts)]
+                 (vreset! texts [])
+                 @(-> (p/let [ok (csp/put chan text)]
+                        (assert ok))
+                      (p/catch #(csp/close! close-chan %)))))
              nil)
            (onBinary [this websocket data last]
-             (try
-               (vswap! bins conj (bi/pure-sub data))
-               (when last
-                 (let [ok (csp/put! chan (apply b/concat @bins))]
-                   (vreset! bins [])
-                   (assert ok)))
-               (catch Exception err
-                 (csp/close! close-chan err)))
+             (vswap! bins conj (bi/pure-sub data))
+             (when last
+               (let [bin (apply b/concat @bins)]
+                 (vreset! bins [])
+                 @(-> (p/let [ok (csp/put chan bin)]
+                        (assert ok))
+                      (p/catch #(csp/close! close-chan %)))))
              nil)
            (onClose [this websocket code reason]
              (csp/close! chan)
              nil)
-           (onError [this websocket err]
-             (csp/close! close-chan err)
-             nil))]
+           (onError [this websocket error]
+             (csp/close! close-chan error)))]
      [chan listener])))
 
-(defn make-websocket-out-chan
+(defn- make-websocket-out-chan
   ([websocket close-chan]
    (make-websocket-out-chan websocket close-chan (csp/chan)))
   ([^WebSocket websocket close-chan chan]

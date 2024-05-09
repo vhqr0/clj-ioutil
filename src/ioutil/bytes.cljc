@@ -502,19 +502,8 @@
   (-close [this]
     (csp/close! (:close-chan this))))
 
-(defrecord error-stream [resource close-chan in-chan out-chan err-chan]
-  IDetachable
-  (-detach [this]
-    (:resource this))
-  ICloseable
-  (-close [this]
-    (csp/close! (:close-chan this))))
-
 (defn make-stream-reader [stream]
   (make-chan-reader (:in-chan stream)))
 
 (defn make-stream-writer [stream]
   (make-chan-writer (:out-chan stream)))
-
-(defn make-stream-error-reader [stream]
-  (make-chan-reader (:err-chan stream)))
