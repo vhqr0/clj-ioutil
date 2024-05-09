@@ -266,12 +266,6 @@
 
 ;;; io utils
 
-(defn want-read-error []
-  (ex-info "want read error" {:type ::want-read}))
-
-(defn want-write-error []
-  (ex-info "want write error" {:type ::want-write}))
-
 (defn detach [detachable]
   (-detach detachable))
 
@@ -285,15 +279,13 @@
   ([reader pred threshold]
    (p/loop [r [reader (-peek reader)]]
      (let [[reader r] r]
-       (if r
-         (let [[data pos] r]
-           (if-let [r (pred data pos)]
-             [reader r]
-             (p/recur
-              (if (< (- (blength data) pos) threshold)
-                (-peek-more reader)
-                (p/rejected (want-write-error))))))
-         (p/rejected (want-read-error)))))))
+       (assert r)
+       (let [[data pos] r]
+         (if-let [r (pred data pos)]
+           [reader r]
+           (do
+             (assert (< (- (blength data) pos) threshold))
+             (p/recur (-peek-more reader)))))))))
 
 (defn read
   ([reader]
@@ -478,9 +470,8 @@
           (if (bempty? b)
             this
             (p/let [ok (csp/put chan b)]
-              (if ok
-                (->chan-writer chan [])
-                (p/rejected (want-write-error)))))))))
+              (assert ok)
+              (->chan-writer chan [])))))))
   (-write [this b]
     (let [{:keys [chan ring]} this]
       (assert ring)
