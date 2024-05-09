@@ -96,7 +96,7 @@
 
 ;;; codec
 
-;; Impl notes: base64 decoder is ignored, goog.crypt.base64 support
+;; Impl notes: base64 alphabet is ignored, goog.crypt.base64 support
 ;; mix of all variants.
 
 (defn bytes->hex [b]
@@ -111,19 +111,19 @@
 
 (def base64-alphabet
   {:default base64/Alphabet.DEFAULT
-   :url     base64/Alphabet.WEBSAFE})
+   :urlsafe base64/Alphabet.WEBSAFE})
 
 (defn bytes->base64
   ([b] (base64/encodeByteArray (js/Uint8Array. b)))
-  ([b encoder] (base64/encodeByteArray (js/Uint8Array. b) (base64-alphabet encoder))))
+  ([b alphabet] (base64/encodeByteArray (js/Uint8Array. b) (base64-alphabet alphabet))))
 
 (defn base64->bytes
   ([s] (.-buffer (base64/decodeStringToUint8Array s)))
-  ([s decoder] (base64->bytes s)))
+  ([s alphabet] (base64->bytes s)))
 
 ;;; str utils
 
-;; Impl notes: TextEncoder with charset is not a standard, but some
+;; Impl notes: TextEncoder with encoding is not a standard, but some
 ;; browsers support this (exclude Chrome), see below.
 ;;
 ;; [https://developer.mozilla.org/en-US/docs/Web/API/TextDecoder/encoding]
@@ -132,17 +132,17 @@
 (defn bytes->str
   ([b]
    (.decode (js/TextDecoder.) b))
-  ([b charset]
-   (let [decoder (js/TextDecoder. charset)]
-     (assert (= (.-encoding decoder) charset))
+  ([b encoding]
+   (let [decoder (js/TextDecoder. encoding)]
+     (assert (= (.-encoding decoder) encoding))
      (.decode decoder b))))
 
 (defn str->bytes
   ([s]
    (.-buffer (.encode (js/TextEncoder.) s)))
-  ([s charset]
-   (let [encoder (js/TextEncoder. charset)]
-     (assert (= (.-encoding encoder) charset))
+  ([s encoding]
+   (let [encoder (js/TextEncoder. encoding)]
+     (assert (= (.-encoding encoder) encoding))
      (.-buffer (.encode encoder s)))))
 
 (defn str->int

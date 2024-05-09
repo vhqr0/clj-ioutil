@@ -146,8 +146,8 @@
 
 ;;; codec
 
-;; Impl notes: base64 also support variant :mime; base64
-;; encoder/decoder also support java Base64Encoder/Decoder objects.
+;; Impl notes: base64 also support alphabet :mime; base64 alphabet
+;; also support java Base64Encoder/Decoder objects.
 
 (defn bytes->hex
   [^bytes b] (.formatHex (HexFormat/of) b))
@@ -155,55 +155,55 @@
 (defn hex->bytes
   [^String s] (.parseHex (HexFormat/of) s))
 
-(defn- make-base64-encoder [encoder]
-  (if (instance? Base64$Encoder encoder)
-    encoder
-    (case encoder
+(defn- make-base64-encoder [alphabet]
+  (if (instance? Base64$Encoder alphabet)
+    alphabet
+    (case alphabet
       :default (Base64/getEncoder)
-      :url     (Base64/getUrlEncoder)
+      :urlsafe (Base64/getUrlEncoder)
       :mime    (Base64/getMimeEncoder))))
 
-(defn- make-base64-decoder [decoder]
-  (if (instance? Base64$Decoder decoder)
-    decoder
-    (case decoder
+(defn- make-base64-decoder [alphabet]
+  (if (instance? Base64$Decoder alphabet)
+    alphabet
+    (case alphabet
       :default (Base64/getDecoder)
-      :url     (Base64/getUrlDecoder)
+      :urlsafe (Base64/getUrlDecoder)
       :mime    (Base64/getMimeDecoder))))
 
 (defn bytes->base64
   ([^bytes b]
    (bytes->base64 b :default))
-  ([^bytes b encoder]
-   (let [^Base64$Encoder encoder (make-base64-encoder encoder)]
+  ([^bytes b alphabet]
+   (let [^Base64$Encoder encoder (make-base64-encoder alphabet)]
      (String. (.encode encoder b)))))
 
 (defn base64->bytes
   ([^String s]
    (base64->bytes s :default))
-  ([^String s decoder]
-   (let [^Base64$Decoder decoder (make-base64-decoder decoder)]
+  ([^String s alphabet]
+   (let [^Base64$Decoder decoder (make-base64-decoder alphabet)]
      (.decode decoder s))))
 
 ;;; str utils
 
-;; Impl notes: charset also support java Charset objects.
+;; Impl notes: encoding also support java Charset objects.
 
 (defn bytes->str
   ([^bytes b]
    (String. b))
-  ([^bytes b charset]
-   (if (instance? Charset charset)
-     (String. b ^Charset charset)
-     (String. b ^String charset))))
+  ([^bytes b encoding]
+   (if (instance? Charset encoding)
+     (String. b ^Charset encoding)
+     (String. b ^String encoding))))
 
 (defn str->bytes
   ([^String s]
    (.getBytes s))
-  ([^String s charset]
-   (if (instance? Charset charset)
-     (.getBytes s ^Charset charset)
-     (.getBytes s ^String charset))))
+  ([^String s encoding]
+   (if (instance? Charset encoding)
+     (.getBytes s ^Charset encoding)
+     (.getBytes s ^String encoding))))
 
 (defn str->int
   ([^String s]

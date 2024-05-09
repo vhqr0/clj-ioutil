@@ -112,14 +112,14 @@
 
 (def bytes->base64
   "[b]
-  [b encoder]
+  [b alphabet]
   Convert bytes to base64 string. The optional arg specify a base64
-  variant in keyword, and atleast support :default and :url."
+  alphabet in keyword, and atleast support :default and :urlsafe."
   impl/bytes->base64)
 
 (def base64->bytes
   "[s]
-  [s decoder]
+  [s alphabet]
   Parse base64 string. The optional args see `bytes->base64`."
   impl/base64->bytes)
 
@@ -127,8 +127,8 @@
 
 (def bytes->str
   "[b]
-  [b charset]
-  Decode bytes to string. The optional arg specify charset in string."
+  [b encoding]
+  Decode bytes to string. The optional arg specify encoding of string."
   impl/bytes->str)
 
 (def str->bytes
@@ -317,21 +317,21 @@
         [reader (nil? r)]))))
 
 (defn read-line
-  [reader & {:keys [end charset] :or {end "\r\n"}}]
+  [reader & {:keys [end encoding] :or {end "\r\n"}}]
   (let [end (if-not (string? end)
               end
-              (if-not charset
+              (if-not encoding
                 (str->bytes end)
-                (str->bytes end charset)))]
+                (str->bytes end encoding)))]
     (letfn [(pred [data pos]
               (when-let [i (index-of data end pos)]
                 [data pos i]))]
       (p/let [[reader [data pos i]] (peek-until reader pred)]
         [(-seek reader (+ i (blength end)))
          (let [b (sub data pos i)]
-           (if-not charset
+           (if-not encoding
              (bytes->str b)
-             (bytes->str b charset)))]))))
+             (bytes->str b encoding)))]))))
 
 (defn shutdown [writer]
   (-shutdown writer))
@@ -345,11 +345,11 @@
     (-write writer b)))
 
 (defn write-line
-  [writer line & {:keys [end charset] :or {end "\r\n"}}]
+  [writer line & {:keys [end encoding] :or {end "\r\n"}}]
   (let [line (str line end)
-        b (if-not charset
+        b (if-not encoding
             (str->bytes line)
-            (str->bytes line charset))]
+            (str->bytes line encoding))]
     (write writer b)))
 
 ;;; bytes io
