@@ -1,4 +1,4 @@
-(ns ioutil.bytes.util)
+(ns clj-ioutil.bytes.util)
 
 ;;; index of
 

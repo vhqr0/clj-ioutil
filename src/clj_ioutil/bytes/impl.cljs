@@ -1,9 +1,9 @@
-(ns ioutil.bytes.impl
+(ns clj-ioutil.bytes.impl
   (:refer-clojure :exclude [rand-int concat compare])
   (:require [cljs.core :as c]
             [clojure.string :as str]
             [goog.crypt.base64 :as base64]
-            [ioutil.bytes.util :as u]))
+            [clj-ioutil.bytes.util :as u]))
 
 (def btype js/ArrayBuffer)
 

@@ -1,6 +1,6 @@
-(ns ioutil.bytes.impl
+(ns clj-ioutil.bytes.impl
   (:refer-clojure :exclude [rand-int concat compare])
-  (:require [ioutil.bytes.util :as u])
+  (:require [clj-ioutil.bytes.util :as u])
   (:import java.nio.ByteBuffer
            java.nio.charset.Charset
            java.util.Arrays

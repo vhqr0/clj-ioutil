@@ -1,7 +1,7 @@
-(ns ioutil.cljs.streams
+(ns clj-ioutil.cljs.streams
   (:require [promesa.core :as p]
             [promesa.exec.csp :as csp]
-            [ioutil.bytes :as b]))
+            [clj-ioutil.bytes :as b]))
 
 (defn go-close [close-chan chans callback]
   (p/vthread

@@ -1,9 +1,9 @@
-(ns ioutil.clj.streams
+(ns clj-ioutil.clj.streams
   (:require [promesa.core :as p]
             [promesa.exec :as pe]
             [promesa.exec.csp :as csp]
-            [ioutil.bytes.impl :as bi]
-            [ioutil.bytes :as b])
+            [clj-ioutil.bytes.impl :as bi]
+            [clj-ioutil.bytes :as b])
   (:import java.time.Duration
            java.nio.ByteBuffer
            [java.io

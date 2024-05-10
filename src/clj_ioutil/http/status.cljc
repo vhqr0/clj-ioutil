@@ -1,4 +1,4 @@
-(ns ioutil.http.status
+(ns clj-ioutil.http.status
   (:require [clojure.set :as set]))
 
 ;; rfc 9110

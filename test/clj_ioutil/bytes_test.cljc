@@ -1,7 +1,7 @@
-(ns ioutil.bytes-test
+(ns clj-ioutil.bytes-test
   (:require #?(:clj [clojure.test :refer :all]
                :cljs [cljs.test :refer [deftest testing are is]])
-            [ioutil.bytes :as b]))
+            [clj-ioutil.bytes :as b]))
 
 (deftest bytes-test
   (testing "sub"

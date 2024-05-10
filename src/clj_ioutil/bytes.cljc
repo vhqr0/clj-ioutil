@@ -1,6 +1,6 @@
-(ns ioutil.bytes
+(ns clj-ioutil.bytes
   (:refer-clojure :exclude [rand-int concat compare read read-line flush -peek -flush -write])
-  (:require [ioutil.bytes.impl :as impl]
+  (:require [clj-ioutil.bytes.impl :as impl]
             [promesa.core :as p]
             [promesa.exec.csp :as csp]))
 

@@ -1,7 +1,7 @@
-(ns ioutil.struct
+(ns clj-ioutil.struct
   (:require [promesa.core :as p]
-            [ioutil.bytes :as b]
-            [ioutil.bytes.util :as u]))
+            [clj-ioutil.bytes :as b]
+            [clj-ioutil.bytes.util :as u]))
 
 (defmulti read-struct-by-type (fn [reader type args] type))
 (defmulti write-struct-by-type (fn [writer type args it] type))
@@ -141,7 +141,7 @@
 
 ;;; assoc
 
-;; assoc multi structs by ioutil.bytes.util/assoc-nested
+;; assoc multi structs by clj-ioutil.bytes.util/assoc-nested
 ;; spec maybe a fn that accept a map and return the final spec
 ;; varlen exmaple: [:assoc :len [:int 1] :data (fn [m] [:bytes (:len m)])]
 ;; varlen-2 example: [:assoc :len [:int 1] [:data1 :data2] (fn [m] [:take 2 [:bytes (:len m)]])]

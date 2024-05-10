@@ -1,7 +1,8 @@
 (ns http.data
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
-            [ioutil.bytes :as b]))
+            [clj-json.core :as json]
+            [clj-ioutil.bytes :as b]))
 
 ;;; x-www-form-urlencoded
 
@@ -33,12 +34,37 @@
        (into {})))
 
 ;;; json
-;; TODO
+
+(defn clj->json [x]
+  (json/write-string x))
+
+(defn json->clj [x  & {:keys [keywordize-keys] :or {keywordize-keys false}}]
+  (binding [json/*read-keyfn* (if-not keywordize-keys identity keyword)]
+    (json/read-string x)))
 
 ;;; edn
 
 (defn clj->edn [x]
   (pr-str x))
 
-(defn edn->clj [x]
+(defn edn->clj [x & opts]
   (edn/read-string x))
+
+;;; data
+
+(def data-type
+  {:form "application/x-www-form-urlencoded"
+   :json "application/json"
+   :edn "application/edn"})
+
+(defn clj->data [x type]
+  (case type
+    :form (clj->form x)
+    :json (clj->json x)
+    :edn (clj->edn x)))
+
+(defn data->clj [x type & opts]
+  (case type
+    :form (apply form->clj x opts)
+    :json (apply json->clj x opts)
+    :edn (apply edn->clj x opts)))
