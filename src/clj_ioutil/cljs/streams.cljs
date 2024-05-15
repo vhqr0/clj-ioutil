@@ -28,11 +28,33 @@
           (p/catch #(csp/close! close-chan %)))))
    chan))
 
+(defn writable-stream->chan
+  ([writable-stream close-chan]
+   (writable-stream->chan writable-stream close-chan (csp/chan :buf 1 :xf (remove b/bempty?))))
+  ([writable-stream close-chan chan]
+   (p/vthread
+    (let [writer (.getWriter writable-stream)]
+      (-> (p/loop [b (csp/take chan)]
+            (if-not b
+              (.close writer)
+              (p/do
+                (.-ready writer)
+                (.write writer b)
+                (p/recur (csp/take chan)))))
+          (p/catch #(csp/close! close-chan %)))))
+   chan))
+
 (defn readable-stream->read-stream [readable-stream]
   (let [close-chan (csp/chan)
         in-chan (readable-stream->chan readable-stream close-chan)]
     (go-close close-chan [in-chan] #(.cancel readable-stream))
     (b/->stream readable-stream close-chan in-chan nil)))
+
+(defn writable-stream->write-stream [writable-stream]
+  (let [close-chan (csp/chan)
+        out-chan (writable-stream->chan writable-stream close-chan)]
+    (go-close close-chan [out-chan] #(.abort writable-stream))
+    (b/->stream writable-stream close-chan nil out-chan)))
 
 ;;; url
 

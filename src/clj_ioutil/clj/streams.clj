@@ -53,9 +53,12 @@
          (bi/pure-sub buffer 0 n))))))
 
 (defn output-stream->writefn [^OutputStream output-stream]
-  (fn [^bytes b]
-    (.write output-stream b)
-    (.flush output-stream)))
+  (fn
+    ([]
+     (.close output-stream))
+    ([^bytes b]
+     (.write output-stream b)
+     (.flush output-stream))))
 
 (defn input-stream->chan
   ([input-stream close-chan]
@@ -79,9 +82,11 @@
    (let [write (output-stream->writefn output-stream)]
      (p/vthread
       (-> (p/loop [b (csp/take chan)]
-            (when b
-              (write b)
-              (p/recur (csp/take chan))))
+            (if-not b
+              (write)
+              (do
+                (write b)
+                (p/recur (csp/take chan)))))
           (p/catch #(csp/close! close-chan %))))
      chan)))
 
