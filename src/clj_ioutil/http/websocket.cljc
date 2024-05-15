@@ -1,4 +1,4 @@
-(ns clj-ioutil.http.client
+(ns clj-ioutil.http.websocket
   (:refer-clojure :exclude [send])
   (:require [promesa.core :as p]
             [promesa.exec.csp :as csp]
