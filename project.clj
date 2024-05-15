@@ -6,5 +6,6 @@
   :dependencies [[org.clojure/clojure "1.12.0-alpha11"]
                  [funcool/promesa "11.0.678"]
                  [clj-json "0.1.0-SNAPSHOT"]]
+  :update :never
   :profiles
   {:cljs {:dependencies [[thheller/shadow-cljs "2.28.5"]]}})

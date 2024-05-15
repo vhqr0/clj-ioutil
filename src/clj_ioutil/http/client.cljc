@@ -1,6 +1,7 @@
 (ns clj-ioutil.http.client
   (:refer-clojure :exclude [send])
-  (:require [clj-ioutil.http.client.protocol :as pt]
+  (:require [promesa.core :as p]
+            [clj-ioutil.http.client.protocol :as pt]
             [clj-ioutil.http.client.impl :as impl]))
 
 (def make-client
@@ -15,11 +16,15 @@
 (defn send [client url & {:as opts}]
   (pt/-send client url opts))
 
+(defn open-read-stream [client url & {:as opts}]
+  (p/let [response (pt/-send client url (assoc opts :accept :stream))]
+    (:body response)))
+
 (comment
   (do
     (def cli (make-client {:redirect true}))
     (def req ["https://jsonplaceholder.typicode.com/todos/1" :accept-type :json])
     (def res (atom nil))
-    (-> (promesa.core/let [resp (apply send cli req)]
+    (-> (p/let [resp (apply send cli req)]
           (reset! res resp))
-        (promesa.core/catch #(reset! res %)))))
+        (p/let #(reset! res %)))))

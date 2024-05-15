@@ -26,13 +26,13 @@
                            (let [[type body] body]
                              [(assoc headers :content-type (d/content-type type))
                               (d/clj->data body type)]))
-          request (->> (cond-> [url]
+          request (->> (cond-> []
                          method  (conj :method method)
                          headers (conj :headers headers)
                          body    (conj :body body)
                          version (conj :version version)
                          timeout (conj :timeout timeout))
-                       (apply s/make-http-request))]
+                       (apply s/make-http-request url))]
       (p/let [^HttpResponse response (s/http-send accept (:client this) request)]
         (let [status (.statusCode response)]
           (if-not (sta/success? status)

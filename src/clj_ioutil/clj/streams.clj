@@ -471,8 +471,10 @@
      (.header builder (if-not (keyword? k) k (name k)) v))
    builder headers))
 
-(defn- websocket-builder-set-subprotocols [^WebSocket$Builder builder subprotocols]
-  (.subprotocols builder (first subprotocols) (into-array String (rest subprotocols))))
+(defn- websocket-builder-set-subprotocol [^WebSocket$Builder builder subprotocol]
+  (if (string? subprotocol)
+    (.subprotocols builder subprotocol (make-array String 0))
+    (.subprotocols builder (first subprotocol) (into-array String (rest subprotocol)))))
 
 (defn- websocket-builder-set-timeout [^WebSocket$Builder builder timeout]
   (.connectTimeout builder (make-duration-time timeout)))
@@ -482,11 +484,11 @@
 
 (defn ^WebSocket make-websocket
   [^HttpClient client uri listener
-   & {:keys [headers subprotocols timeout] :or {timeout *websocket-connect-timeout*}}]
+   & {:keys [headers subprotocol timeout] :or {timeout *websocket-connect-timeout*}}]
   (-> (cond-> (.newWebSocketBuilder client)
-        headers      (websocket-builder-add-headers headers)
-        subprotocols (websocket-builder-set-subprotocols subprotocols)
-        timeout      (websocket-builder-set-timeout timeout))
+        headers     (websocket-builder-add-headers headers)
+        subprotocol (websocket-builder-set-subprotocol subprotocol)
+        timeout     (websocket-builder-set-timeout timeout))
       (websocket-builder-build uri listener)))
 
 (def ^:dynamic *websocket-chan-size* 1024)
@@ -548,20 +550,3 @@
       (let [out-chan (make-websocket-out-chan websocket close-chan)]
         (go-close close-chan [in-chan out-chan] #(.abort websocket))
         (b/->stream websocket close-chan in-chan out-chan)))))
-
-(defn websocket-send
-  ([websocket]
-   (csp/close! (:out-chan websocket)))
-  ([websocket data]
-   (p/let [ok (csp/put (:out-chan websocket) data)]
-     (assert ok))))
-
-(defn websocket-recv [websocket]
-  (csp/take (:in-chan websocket)))
-
-(comment
-  (do
-    (def u "wss://echo.websocket.org")
-    (def s @(make-websocket-stream (make-http-client) u))
-    @(p/let [it (websocket-recv s)]
-       (println it))))

@@ -172,8 +172,13 @@
 (defn make-websocket
   ([url]
    (js/WebSocket. (make-url url)))
-  ([url protocols]
-   (js/WebSocket. (make-url url) (to-array protocols))))
+  ([url & {:keys [subprotocol]}]
+   (if-not subprotocol
+     (js/WebSocket. (make-url url))
+     (js/WebSocket. (make-url url)
+                    (if (string? subprotocol)
+                      subprotocol
+                      (to-array subprotocol))))))
 
 (def ^:dynamic *websocket-chan-size* 1024)
 
@@ -207,30 +212,11 @@
         (p/catch #(csp/close! close-chan %))))
    chan))
 
-(defn make-websocket-stream [& args]
+(defn make-websocket-stream [url & opts]
   (p/vthread
-   (let [websocket (apply make-websocket args)
+   (let [websocket (apply make-websocket url opts)
          close-chan (csp/chan)
          in-chan (make-websocket-in-chan websocket close-chan)
          out-chan (make-websocket-out-chan websocket close-chan)]
      (go-close close-chan [in-chan out-chan] #(.close websocket))
      (b/->stream websocket close-chan in-chan out-chan))))
-
-(defn websocket-send
-  ([websocket]
-   (csp/close! (:out-chan websocket)))
-  ([websocket data]
-   (p/let [ok (csp/put (:out-chan websocket) data)]
-     (assert ok))))
-
-(defn websocket-recv [websocket]
-  (csp/take (:in-chan websocket)))
-
-(comment
-  (do
-    (def u "wss://echo.websocket.org")
-    (def res (atom nil))
-    (-> (p/let [s (make-websocket-stream u)
-                it (websocket-recv s)]
-          (reset! res it))
-        (p/catch #(reset! res %)))))
