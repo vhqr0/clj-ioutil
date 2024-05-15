@@ -16,7 +16,7 @@
 (defn send [client url & {:as opts}]
   (pt/-send client url opts))
 
-(defn open-read-stream [client url & {:as opts}]
+(defn make-read-stream [client url & {:as opts}]
   (p/let [response (pt/-send client url (assoc opts :accept :stream))]
     (:body response)))
 
