@@ -28,6 +28,12 @@
           (p/catch #(csp/close! close-chan %)))))
    chan))
 
+(defn readable-stream->read-stream [readable-stream]
+  (let [close-chan (csp/chan)
+        in-chan (readable-stream->chan readable-stream close-chan)]
+    (go-close close-chan [in-chan] #(.cancel readable-stream))
+    (b/->stream readable-stream close-chan in-chan nil)))
+
 ;;; url
 
 (defn make-url-search [search]
@@ -128,7 +134,7 @@
     referrer-policy (assoc "referrerPolicy" (http-referrer-policy referrer-policy))
     integrity (assoc "integrity" integrity)
     priority (assoc "priority" (http-prioirty priority))
-    keepalive (assoc "keepalive" keepalive)
+    (some? keepalive) (assoc "keepalive" keepalive)
     signal (assoc "signal" signal)))
 
 (defn make-http-request
@@ -143,19 +149,19 @@
   ([input & opts]
    (js/fetch input (clj->js (apply make-http-opts opts)))))
 
-(defn make-http-reader-stream [input & opts]
+(defn make-http-read-stream [input & opts]
   (p/let [response (apply http-fetch input opts)
-          body (.-body response)
+          readable-stream (.-body response)
           close-chan (csp/chan)
-          in-chan (readable-stream->chan body close-chan)]
-    (go-close close-chan [in-chan] #(.cancel body))
+          in-chan (readable-stream->chan readable-stream close-chan)]
+    (go-close close-chan [in-chan] #(.cancel readable-stream))
     (b/->stream response close-chan in-chan nil)))
 
 (comment
   (do
     (def u "http://www.bing.com")
     (def res (atom nil))
-    (-> (p/let [s (make-http-reader-stream u)
+    (-> (p/let [s (make-http-read-stream u)
                 r (b/make-stream-reader s)
                 [r it] (b/read-all r)]
           (reset! res (b/bytes->str it)))

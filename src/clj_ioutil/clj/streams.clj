@@ -52,8 +52,7 @@
          ;; use pure sub here
          (bi/pure-sub buffer 0 n))))))
 
-(defn output-stream->writefn
-  [^OutputStream output-stream]
+(defn output-stream->writefn [^OutputStream output-stream]
   (fn [^bytes b]
     (.write output-stream b)
     (.flush output-stream)))
@@ -75,8 +74,7 @@
 
 (defn output-stream->chan
   ([output-stream close-chan]
-   (output-stream->chan output-stream close-chan
-                        (csp/chan :buf 1 :xf (remove b/bempty?))))
+   (output-stream->chan output-stream close-chan (csp/chan :buf 1 :xf (remove b/bempty?))))
   ([output-stream close-chan chan]
    (let [write (output-stream->writefn output-stream)]
      (p/vthread
@@ -86,6 +84,18 @@
               (p/recur (csp/take chan))))
           (p/catch #(csp/close! close-chan %))))
      chan)))
+
+(defn input-stream->read-stream [^InputStream input-stream]
+  (let [close-chan (csp/chan)
+        in-chan (input-stream->chan input-stream close-chan)]
+    (go-close close-chan [in-chan] #(.close input-stream))
+    (b/->stream input-stream close-chan in-chan nil)))
+
+(defn output-stream->write-stream [^OutputStream output-stream]
+  (let [close-chan (csp/chan)
+        out-chan (output-stream->chan output-stream close-chan)]
+    (go-close close-chan [out-chan] #(.close output-stream))
+    (b/->stream output-stream close-chan nil out-chan)))
 
 ;;; file
 
@@ -134,19 +144,13 @@
 
 (defn make-file-read-stream [file]
   (p/vthread
-   (let [^InputStream input-stream (make-file-input-stream file)
-         close-chan (csp/chan)
-         in-chan (input-stream->chan input-stream close-chan)]
-     (go-close close-chan [in-chan] #(.close input-stream))
-     (b/->stream input-stream close-chan in-chan nil))))
+   (let [^InputStream input-stream (make-file-input-stream file)]
+     (input-stream->read-stream input-stream))))
 
 (defn make-file-write-stream [file]
   (p/vthread
-   (let [^OutputStream output-stream (make-file-output-stream file)
-         close-chan (csp/chan)
-         out-chan (output-stream->chan output-stream close-chan)]
-     (go-close close-chan [out-chan] #(.close output-stream))
-     (b/->stream output-stream close-chan nil out-chan))))
+   (let [^OutputStream output-stream (make-file-output-stream file)]
+     (output-stream->write-stream output-stream))))
 
 (comment
   (do
@@ -279,7 +283,7 @@
 
 ;;; socket
 
-(def ^:dynamic *socket-connect-timeout* (Duration/ofSeconds 2))
+(def ^:dynamic *socket-connect-timeout* (Duration/ofSeconds 5))
 
 (defn ^Socket make-socket
   ([socket]
@@ -305,19 +309,16 @@
        (let [^SSLSocketFactory f (SSLSocketFactory/getDefault)]
          (.createSocket f socket ^String host ^int port true))))))
 
-(defn make-socket-stream
-  ([^Socket socket input-stream output-stream]
-   (let [close-chan (csp/chan)
+(defn make-socket-stream [^Socket socket]
+  (p/vthread
+   (let [^Socket socket (make-socket socket)
+         input-stream (.getInputStream socket)
+         output-stream (.getOutputStream socket)
+         close-chan (csp/chan)
          in-chan (input-stream->chan input-stream close-chan)
          out-chan (output-stream->chan output-stream close-chan)]
      (go-close close-chan [in-chan out-chan] #(.close socket))
-     (b/->stream socket close-chan in-chan out-chan)))
-  ([socket]
-   (p/vthread
-    (let [^Socket socket (make-socket socket)
-          input-stream (.getInputStream socket)
-          output-stream (.getOutputStream socket)]
-      (make-socket-stream socket input-stream output-stream)))))
+     (b/->stream socket close-chan in-chan out-chan))))
 
 (comment
   (do
@@ -332,7 +333,7 @@
 
 ;;; http
 
-(def ^:dynamic *http-connect-timeout* (Duration/ofSeconds 2))
+(def ^:dynamic *http-connect-timeout* (Duration/ofSeconds 5))
 (def ^:dynamic *http-request-timeout* (Duration/ofSeconds 5))
 
 (def http-version
@@ -399,8 +400,8 @@
 
 (defn- http-request-builder-add-headers [^HttpRequest$Builder builder headers]
   (reduce
-   (fn [builder [k v]]
-     (.header ^HttpRequest$Builder builder k v))
+   (fn [^HttpRequest$Builder builder [k v]]
+     (.header builder (if-not (keyword? k) k (name k)) v))
    builder headers))
 
 (defn- http-request-builder-set-version [^HttpRequest$Builder builder version]
@@ -443,18 +444,19 @@
 (defmethod http-send :stream [rtype ^HttpClient client request]
   (.sendAsync client request (HttpResponse$BodyHandlers/ofInputStream)))
 
-(defn make-http-read-stream [client request]
-  (p/let [^HttpResponse response (http-send :stream client request)]
-    (let [^InputStream input-stream (.body response)
-          close-chan (csp/chan)
-          in-chan (input-stream->chan input-stream close-chan)]
-      (go-close close-chan [in-chan] #(.close input-stream))
-      (b/->stream response close-chan in-chan nil))))
+(defn make-http-read-stream [client uri & opts]
+  (let [^HttpRequest request (apply make-http-request uri opts)]
+    (p/let [^HttpResponse response (http-send :stream client request)]
+      (let [^InputStream input-stream (.body response)
+            close-chan (csp/chan)
+            in-chan (input-stream->chan input-stream close-chan)]
+        (go-close close-chan [in-chan] #(.close input-stream))
+        (b/->stream response close-chan in-chan nil)))))
 
 (comment
   (do
     (def u "https://www.bing.com")
-    (def s @(make-http-read-stream (make-http-client) (make-http-request u)))
+    (def s @(make-http-read-stream (make-http-client) u))
     @(p/let [r (b/make-stream-reader s)
              [r it] (b/read-all r)]
        (println (b/bytes->str it)))))
@@ -465,7 +467,8 @@
 
 (defn- websocket-builder-add-headers [^WebSocket$Builder builder headers]
   (reduce
-   (fn [builder [k v]] (.header ^WebSocket$Builder builder k v))
+   (fn [^WebSocket$Builder builder [k v]]
+     (.header builder (if-not (keyword? k) k (name k)) v))
    builder headers))
 
 (defn- websocket-builder-set-subprotocols [^WebSocket$Builder builder subprotocols]
@@ -478,9 +481,9 @@
   (.buildAsync builder (make-uri uri) listener))
 
 (defn ^WebSocket make-websocket
-  [client uri listener & {:keys [headers subprotocols timeout]
-                          :or {timeout *websocket-connect-timeout*}}]
-  (-> (cond-> (.newWebSocketBuilder ^HttpClient client)
+  [^HttpClient client uri listener
+   & {:keys [headers subprotocols timeout] :or {timeout *websocket-connect-timeout*}}]
+  (-> (cond-> (.newWebSocketBuilder client)
         headers      (websocket-builder-add-headers headers)
         subprotocols (websocket-builder-set-subprotocols subprotocols)
         timeout      (websocket-builder-set-timeout timeout))
@@ -538,8 +541,7 @@
         (p/catch #(csp/close! close-chan %))))
    chan))
 
-(defn make-websocket-stream
-  [client uri & opts]
+(defn make-websocket-stream [client uri & opts]
   (let [close-chan (csp/chan)
         [in-chan listener] (make-websocket-in-chan close-chan)]
     (p/let [^WebSocket websocket (apply make-websocket client uri listener opts)]

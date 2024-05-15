@@ -1,4 +1,4 @@
-(ns http.data
+(ns clj-ioutil.http.data
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
             [clj-json.core :as json]
@@ -22,14 +22,14 @@
                (str->form-urlencoded (str v)))))
        (str/join \&)))
 
-(defn form->clj [x & {:keys [keywordize-keys] :or {keywordize-keys false}}]
+(defn form->clj [x & {:keys [keywordize] :or {keywordize false}}]
   (->> (str/split x #"&")
        (map
         #(let [[k v] (str/split % #"=" 2)]
            (assert v)
            (let [k (form-urlencoded->str k)
                  v (form-urlencoded->str v)
-                 k (if-not keywordize-keys k (keyword k))]
+                 k (if-not keywordize k (keyword k))]
              [k v])))
        (into {})))
 
@@ -38,8 +38,8 @@
 (defn clj->json [x]
   (json/write-string x))
 
-(defn json->clj [x  & {:keys [keywordize-keys] :or {keywordize-keys false}}]
-  (binding [json/*read-keyfn* (if-not keywordize-keys identity keyword)]
+(defn json->clj [x  & {:keys [keywordize] :or {keywordize false}}]
+  (binding [json/*read-keyfn* (if-not keywordize identity keyword)]
     (json/read-string x)))
 
 ;;; edn
@@ -52,7 +52,7 @@
 
 ;;; data
 
-(def data-type
+(def content-type
   {:form "application/x-www-form-urlencoded"
    :json "application/json"
    :edn "application/edn"})
