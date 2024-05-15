@@ -54,11 +54,10 @@
   ([b & bs]
    (let [bs (cons b bs)
          is (reductions + (map blength bs))
-         nb (bmake (last is))
-         na (js/Int8Array. nb)]
+         na (js/Int8Array. (last is))]
      (doseq [[b i] (zipmap bs (cons 0 (butlast is)))]
        (.set na (js/Int8Array. b) i))
-     nb)))
+     (.-buffer na))))
 
 (defn concat [& bs]
   (->> (map #(if (vector? %) (apply sub %) %) bs)
@@ -222,7 +221,7 @@
 ;;; rand
 
 (defn rand-bytes [n]
-  (bmake (repeatedly n #(c/rand-int 256))))
+  (.-buffer (js/crypto.getRandomValues (js/Int8Array. n))))
 
 (defn rand-int [n & {:keys [unsigned] :or {unsigned false}}]
   (bytes->int (rand-bytes n) :unsigned unsigned))
@@ -230,7 +229,8 @@
 (defn rand-float [n]
   (bytes->float (rand-bytes n)))
 
-(def rand-uuid random-uuid)
+(defn rand-uuid []
+  (uuid (js/crypto.randomUUID)))
 
 ;;; bits utils
 

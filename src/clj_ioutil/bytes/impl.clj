@@ -5,6 +5,7 @@
            java.nio.charset.Charset
            java.util.Arrays
            java.util.Random
+           java.security.SecureRandom
            java.util.UUID
            java.util.HexFormat
            [java.util Base64 Base64$Encoder Base64$Decoder]
@@ -358,7 +359,7 @@
 ;; Impl notes: rand-int/float support 0 arg, return long/double by
 ;; default.
 
-(def ^:dynamic ^Random *random* (Random.))
+(def ^:dynamic ^Random *random* (SecureRandom.))
 
 (defn rand-bytes [n]
   (let [b (bmake n)]
