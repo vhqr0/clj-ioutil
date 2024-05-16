@@ -30,20 +30,20 @@
                               (d/clj->data body type)]))
           controller (js/AbortController.)
           request (->> (cond-> []
-                         method            (conj :method method)
-                         headers           (conj :headers headers)
-                         body              (conj :body body)
-                         mode              (conj :mode mode)
-                         credentials       (conj :credentials credentials)
-                         cache             (conj :cache cache)
-                         redirect          (conj :redirect redirect)
-                         referrer          (conj :referrer referrer)
-                         referrer-policy   (conj :referrer-policy referrer-policy)
-                         integrity         (conj :integrity integrity)
-                         priority          (conj :priority priority)
-                         (some? keepalive) (conj :keepalive keepalive))
+                         method          (conj :method method)
+                         headers         (conj :headers headers)
+                         body            (conj :body body)
+                         mode            (conj :mode mode)
+                         credentials     (conj :credentials credentials)
+                         cache           (conj :cache cache)
+                         redirect        (conj :redirect redirect)
+                         referrer        (conj :referrer referrer)
+                         referrer-policy (conj :referrer-policy referrer-policy)
+                         integrity       (conj :integrity integrity)
+                         priority        (conj :priority priority)
+                         keepalive       (conj :keepalive keepalive))
                        (apply s/make-http-request url :signal (.-signal controller)))]
-      (js/setTimeout #(.abort controller) 5)
+      (js/setTimeout #(.abort controller) *request-timeout*)
       (p/let [response (apply s/http-fetch url (apply concat opts))]
         (let [status (.-status response)]
           (if-not (sta/success? status)
@@ -61,8 +61,5 @@
                     (p/rejected (ex-info "http content type error" {:type :http-content-type :content-type content-type}))
                     {:status status :headers headers :body (d/data->clj body accept-type :keywordize accept-keywordize)}))))))))))
 
-(defn make-client [& {:keys [defaults headers redirect]}]
-  (let [defaults (if (nil? redirect)
-                   defaults
-                   (assoc defaults :redirect (if-not redirect :error :follow)))]
-    (->client defaults headers)))
+(defn make-client [& {:keys [defaults headers]}]
+  (->client defaults headers))

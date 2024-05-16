@@ -9,7 +9,6 @@
   make a platform native http client from opts, atleast support:
   - default: default values of request opts.
   - headers: map from str to printable (eg. str, number).
-  - redirect: bool, should follow the redirect, default to true.
   "
   impl/make-client)
 
@@ -22,9 +21,9 @@
 
 (comment
   (do
-    (def cli (make-client {:redirect true}))
+    (def cli (make-client))
     (def req ["https://jsonplaceholder.typicode.com/todos/1" :accept-type :json])
     (def res (atom nil))
     (-> (p/let [resp (apply send cli req)]
           (reset! res resp))
-        (p/let #(reset! res %)))))
+        (p/catch #(reset! res %)))))

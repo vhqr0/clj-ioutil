@@ -7,7 +7,8 @@
 (def make-stream
   "[url & opts]
   make a platform native websocket stream to url from opts, atleast support:
-  - subprotocol: string or vector of strings."
+  - subprotocol: string or vector of strings.
+  "
   impl/make-stream)
 
 (defn send

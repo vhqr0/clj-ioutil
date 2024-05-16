@@ -10,7 +10,8 @@
             InputStream OutputStream File FileDescriptor FileInputStream FileOutputStream]
            [java.net
             SocketAddress InetAddress InetSocketAddress URI Socket
-            Proxy Proxy$Type ProxySelector Authenticator PasswordAuthentication CookieManager]
+            Proxy Proxy$Type ProxySelector Authenticator PasswordAuthentication
+            CookieHandler CookieManager CookieStore CookiePolicy]
            javax.net.ssl.SSLSocketFactory
            [java.net.http
             HttpClient HttpClient$Builder HttpClient$Version HttpClient$Redirect
@@ -178,7 +179,9 @@
    (if (instance? InetAddress address)
      address
      (if-not (vector? address)
-       (InetAddress/getByName address)
+       (if (bytes? address)
+         (InetAddress/getByAddress ^bytes address)
+         (InetAddress/getByName ^String address))
        (apply make-address address))))
   ([]
    (InetAddress/getLocalHost)))
@@ -196,6 +199,8 @@
      (if-not (vector? address)
        (InetSocketAddress. address)
        (apply make-socket-address address))))
+  ([]
+   (InetSocketAddress. 0))
   ([address ^long port]
    (if (instance? InetAddress address)
      (InetSocketAddress. ^InetAddress address port)
@@ -213,9 +218,9 @@
      (if-not (vector? uri)
        (URI. uri)
        (apply make-uri uri))))
-  ([scheme & {:keys [user host port path query fragment]
-              :or {user "" host "" port 80 path "" query "" fragment ""}}]
-   (URI. scheme user host port path query fragment)))
+  ([scheme host & {:keys [user port path query fragment]}]
+   (let [port (or port (case scheme "http" 80 "https" 443))]
+     (URI. scheme user host port path query fragment))))
 
 (comment
   (do
@@ -231,31 +236,39 @@
 
 (defn ^Proxy make-proxy
   ([proxy]
-   (if (= proxy :direct)
-     Proxy/NO_PROXY
-     (let [[type address] proxy]
-       (Proxy. (proxy-type type) (make-socket-address address)))))
-  ([proxy host port]
-   (if-not (= proxy :default)
-     (make-proxy proxy)
-     (let [^URI uri (URI. "http"  "" host port "" "" "")]
-       (rand-nth (.select (ProxySelector/getDefault) uri))))))
+   (if (instance? Proxy proxy)
+     proxy
+     (if (= proxy :direct)
+       Proxy/NO_PROXY
+       (do
+         (assert (vector? proxy))
+         (apply make-proxy proxy)))))
+  ([]
+   Proxy/NO_PROXY)
+  ([type address]
+   (Proxy. (proxy-type type) (make-socket-address address))))
 
-(comment
-  (do
-    (println (str (make-proxy :default "bing.com" 80)))
-    (println (str (make-proxy :default "google.com" 80)))
-    (println (str (make-proxy :direct "bing.com" 80)))
-    (println (str (make-proxy [:socks 1080] "google.com" 80)))
-    (println (str (make-proxy [:http 1080] "google.com" 80)))))
+(defn select-proxy [proxy host port]
+  (cond (= proxy :default)
+        (select-proxy (ProxySelector/getDefault) host port)
+        (instance? ProxySelector proxy)
+        (let [^URI uri (URI. "http"  "" host port "" "" "")]
+          (rand-nth (.select ^ProxySelector proxy uri)))
+        :else
+        (make-proxy proxy)))
 
-(defn ^ProxySelector make-proxy-selector [proxy]
-  (if (= proxy :default)
-    (ProxySelector/getDefault)
-    (let [proxies (java.util.Arrays/asList (into-array Proxy [(make-proxy proxy)]))]
-      (clojure.core/proxy [ProxySelector] []
-        (select [uri]
-          proxies)))))
+(defn ^ProxySelector make-proxy-selector
+  ([proxy]
+   (if (instance? ProxySelector proxy)
+     proxy
+     (if (= proxy :default)
+       (ProxySelector/getDefault)
+       (let [proxies (java.util.Arrays/asList (into-array Proxy [(make-proxy proxy)]))]
+         (clojure.core/proxy [ProxySelector] []
+           (select [uri]
+             proxies))))))
+  ([]
+   (ProxySelector/getDefault)))
 
 (comment
   (do
@@ -266,7 +279,13 @@
     (println (f :default "google.com"))
     (println (f :direct "bing.com"))
     (println (f [:socks 1080] "google.com"))
-    (println (f [:http 1080] "google.com"))))
+    (println (f [:http 1080] "google.com")))
+  (do
+    (println (str (select-proxy :default "bing.com" 80)))
+    (println (str (select-proxy :default "google.com" 80)))
+    (println (str (select-proxy :direct "bing.com" 80)))
+    (println (str (select-proxy [:socks 1080] "google.com" 80)))
+    (println (str (select-proxy [:http 1080] "google.com" 80)))))
 
 (defn ^Authenticator make-auth
   ([auth]
@@ -283,8 +302,27 @@
        (getPasswordAuthentication []
          auth)))))
 
-(defn ^CookieManager make-cookie []
-  (CookieManager.))
+(def cookie-policy
+  {:accept-all CookiePolicy/ACCEPT_ALL
+   :accept-none CookiePolicy/ACCEPT_NONE
+   :accept-original-server CookiePolicy/ACCEPT_ORIGINAL_SERVER})
+
+(defn ^CookieHandler make-cookie-manager
+  ([cookie]
+   (if (instance? CookieHandler cookie)
+     cookie
+     (if (= cookie :default)
+       (CookieHandler/getDefault)
+       (do
+         (assert (vector? cookie))
+         (apply make-cookie-manager cookie)))))
+  ([]
+   (CookieManager.))
+  ([store & {:keys [policy] :or {policy :accept-all}}]
+   (let [^CookieStore store (if-not (instance? CookieManager store)
+                              store
+                              (.getCookieStore ^CookieManager store))]
+     (CookieManager. store (cookie-policy policy)))))
 
 ;;; socket
 
@@ -305,7 +343,7 @@
                  :or {timeout *socket-connect-timeout* ssl false}}]
    (let [^Socket socket (if-not proxy
                           (Socket.)
-                          (Socket. (make-proxy proxy host port)))]
+                          (Socket. (select-proxy proxy host port)))]
      (if-not timeout
        (.connect socket (make-socket-address host port))
        (.connect socket (make-socket-address host port) (make-int-time timeout)))
@@ -375,7 +413,7 @@
   (.authenticator builder (make-auth auth)))
 
 (defn- http-client-builder-set-cookie [^HttpClient$Builder builder cookie]
-  (.cookieHandler builder cookie))
+  (.cookieHandler builder (make-cookie-manager cookie)))
 
 (defn- http-client-builder-set-version [^HttpClient$Builder builder version]
   (.version builder (http-version version)))

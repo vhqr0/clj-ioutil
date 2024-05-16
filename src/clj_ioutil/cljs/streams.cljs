@@ -156,7 +156,7 @@
     referrer-policy (assoc "referrerPolicy" (http-referrer-policy referrer-policy))
     integrity (assoc "integrity" integrity)
     priority (assoc "priority" (http-prioirty priority))
-    (some? keepalive) (assoc "keepalive" keepalive)
+    keepalive (assoc "keepalive" keepalive)
     signal (assoc "signal" signal)))
 
 (defn make-http-request

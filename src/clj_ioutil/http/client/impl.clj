@@ -50,15 +50,19 @@
                     (p/rejected (ex-info "http content type error" {:type :http-content-type :content-type content-type}))
                     {:status status :headers headers :body (d/data->clj body accept-type :keywordize accept-keywordize)}))))))))))
 
+(def ^:dynamic *default-proxy* (s/make-proxy-selector))
+(def ^:dynamic *default-cookie* (s/make-cookie-manager))
+
 (defn make-client
-  [& {:keys [defaults headers redirect executor proxy auth cookie version timeout]}]
+  [& {:keys [defaults headers redirect executor proxy auth cookie version timeout]
+      :or {proxy *default-proxy* cookie *default-cookie* redirect :default}}]
   (let [client (->> (cond-> []
-                      (some? redirect) (conj :redirect (if redirect :default :never))
-                      executor         (conj :executor executor)
-                      proxy            (conj :proxy proxy)
-                      auth             (conj :auth auth)
-                      cookie           (conj :cookie cookie)
-                      version          (conj :version version)
-                      timeout          (conj :timeout timeout))
+                      executor (conj :executor executor)
+                      proxy    (conj :proxy proxy)
+                      auth     (conj :auth auth)
+                      cookie   (conj :cookie cookie)
+                      version  (conj :version version)
+                      timeout  (conj :timeout timeout)
+                      redirect (conj :redirect redirect))
                     (apply s/make-http-client))]
     (->client client defaults headers)))
