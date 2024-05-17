@@ -1,5 +1,5 @@
 (ns clj-ioutil.bytes
-  (:refer-clojure :exclude [rand-int concat compare read read-line flush -peek -flush -write])
+  (:refer-clojure :exclude [rand-int concat compare read read-line flush])
   (:require [clj-ioutil.bytes.impl :as impl]
             [promesa.core :as p]
             [promesa.exec.csp :as csp]))
@@ -240,44 +240,38 @@
 ;;; io protocols
 
 (defprotocol IDetachable
-  (-detach [this]
-    "Detach low level resource from reader/writer/stream."))
+  (detach [this]
+    "Detach low level resource from reader/writer."))
 
 (defprotocol ICloseable
-  (-close [this]
+  (close [this]
     "Close all related resources of reader/writer/stream."))
 
 (defprotocol IBytesReader
-  (-peek [this]
-    "Peek buffer of reader, return (data, pos).")
-  (-seek [this pos]
+  (peek-buffer [this]
+    "Peek buffer (data, pos).")
+  (seek-buffer [this pos]
     "Reset pos of buffer, return new reader.")
-  (-peek-more [this]
-    "Peek more bytes than last peek from reader, return p/let-able
-    new reader, and (data, pos) or nil if no more bytes to peek."))
+  (peek-more [this]
+    "Peek more bytes than last peek, return p/let-able new reader,
+    and (data, pos) or nil if no more bytes to peek."))
 
 (defprotocol IBytesWriter
-  (-shutdown [this]
+  (shutdown [this]
     "Shutdown writing, return p/let-able new writer.")
-  (-flush [this]
+  (flush [this]
     "Flush buffered bytes, return p/let-able new writer.")
-  (-write [this b]
-    "Write bytes to buffer, return p/let-able new writer."))
+  (push [this b]
+    "Push bytes to buffer, return p/let-able new writer."))
 
 ;;; io utils
-
-(defn detach [detachable]
-  (-detach detachable))
-
-(defn close [closeable]
-  (-close closeable))
 
 (def ^:dynamic *peek-threshold* 65536)
 
 (defn peek-until
   ([reader pred] (peek-until reader pred *peek-threshold*))
   ([reader pred threshold]
-   (p/loop [r [reader (-peek reader)]]
+   (p/loop [r [reader (peek-buffer reader)]]
      (let [[reader r] r]
        (assert r)
        (let [[data pos] r]
@@ -285,16 +279,16 @@
            [reader r]
            (do
              (assert (< (- (blength data) pos) threshold))
-             (p/recur (-peek-more reader)))))))))
+             (p/recur (peek-more reader)))))))))
 
 (defn read
   ([reader]
-   (let [[data pos] (-peek reader)]
+   (let [[data pos] (peek-buffer reader)]
      (if (< pos (blength data))
-       [(-seek reader (blength data)) (sub data pos)]
-       (p/let [[reader r] (-peek-more reader)]
+       [(seek-buffer reader (blength data)) (sub data pos)]
+       (p/let [[reader r] (peek-more reader)]
          (if-let [[data pos] r]
-           [(-seek reader (blength data)) (sub data pos)]
+           [(seek-buffer reader (blength data)) (sub data pos)]
            [reader nil])))))
   ([reader n]
    (letfn [(pred [data pos]
@@ -302,7 +296,7 @@
                (when (<= i (blength data))
                  [data pos i])))]
      (p/let [[reader [data pos i]] (peek-until reader pred)]
-       [(-seek reader i) (sub data pos i)]))))
+       [(seek-buffer reader i) (sub data pos i)]))))
 
 (defn read-all [reader]
   (p/loop [reader reader bs []]
@@ -312,10 +306,10 @@
         (p/recur reader (conj bs b))))))
 
 (defn read-eof [reader]
-  (let [[data pos] (-peek reader)]
+  (let [[data pos] (peek-buffer reader)]
     (if (< pos (blength data))
       [reader false]
-      (p/let [[reader r] (-peek-more reader)]
+      (p/let [[reader r] (peek-more reader)]
         [reader (nil? r)]))))
 
 (defn read-line
@@ -329,22 +323,16 @@
               (when-let [i (index-of data end pos)]
                 [data pos i]))]
       (p/let [[reader [data pos i]] (peek-until reader pred)]
-        [(-seek reader (+ i (blength end)))
+        [(seek-buffer reader (+ i (blength end)))
          (let [b (sub data pos i)]
            (if-not encoding
              (bytes->str b)
              (bytes->str b encoding)))]))))
 
-(defn shutdown [writer]
-  (-shutdown writer))
-
-(defn flush [writer]
-  (-flush writer))
-
 (defn write [writer b]
   (if (bempty? b)
     writer
-    (-write writer b)))
+    (push writer b)))
 
 (defn write-line
   [writer line & {:keys [end encoding] :or {end "\r\n"}}]
@@ -357,112 +345,98 @@
 ;;; bytes io
 
 (comment
-  (extend-type #?(:clj (Class/forName "[B")
-                  :cljs js/ArrayBuffer)
+  (extend btype
     IDetachable
-    (-detach [this]
-      this)
+    {:detach (fn [this] this)}
     IBytesReader
-    (-peek [this]
-      [this 0])
-    (-seek [this pos]
-      (sub this pos))
-    (-peek-more [this]
-      [this nil])
+    {:peek-buffer (fn [this] [this 0])
+     :seek-buffer (fn [this pos] (sub this pos))
+     :peek-more (fn [this] [this nil])}
     IBytesWriter
-    (-shutdown [this]
-      this)
-    (-flush [this]
-      this)
-    (-write [this b]
-      (concat this b))))
+    {:shutdown (fn [this] this)
+     :flush (fn [this] this)
+     :push (fn [this b] (concat this b))}))
 
 ;;; buffered bytes io
 
-(defrecord reader [data pos])
+(defrecord BufferedReader [data pos])
 
-(extend-type reader
+(extend-type BufferedReader
   IDetachable
-  (-detach [this]
+  (detach [this]
     (let [{:keys [data pos]} this]
       (sub data pos)))
   IBytesReader
-  (-peek [this]
+  (peek-buffer [this]
     (let [{:keys [data pos]} this]
       [data pos]))
-  (-seek [this pos]
-    (->reader (:data this) pos))
-  (-peek-more [this]
+  (seek-buffer [this pos]
+    (->BufferedReader (:data this) pos))
+  (peek-more [this]
     [this nil]))
 
-(defrecord writer [data ring])
+(defrecord BufferedWriter [data ring])
 
-(extend-type writer
+(extend-type BufferedWriter
   IDetachable
-  (-detach [this]
+  (detach [this]
     (:data this))
   IBytesWriter
-  (-shutdown [this]
-    (->writer (:data this) nil))
-  (-flush [this]
+  (shutdown [this]
+    (->BufferedWriter (:data this) nil))
+  (flush [this]
     (let [{:keys [data ring]} this]
       (if (or (not ring) (empty? ring))
         this
-        (->writer (apply concat data ring) []))))
-  (-write [this b]
+        (->BufferedWriter (apply concat data ring) []))))
+  (push [this b]
     (let [{:keys [data ring]} this]
       (assert ring)
-      (->writer data (conj ring b)))))
+      (->BufferedWriter data (conj ring b)))))
 
-(defn make-reader
-  ([] (make-reader (bmake 0)))
-  ([data] (->reader data 0)))
+(defn buffered-reader
+  ([] (buffered-reader (bmake 0)))
+  ([b] (->BufferedReader b 0)))
 
-(defn make-writer
-  ([] (make-writer (bmake 0)))
-  ([data] (->writer data [])))
+(defn buffered-writer
+  ([] (buffered-writer (bmake 0)))
+  ([b] (->BufferedWriter b [])))
 
 ;;; chan io
 
-(defrecord chan-reader [data pos chan])
+(defrecord ChanReader [data pos chan])
 
-(extend-type chan-reader
-  IDetachable
-  (-detach [this]
-    (:chan this))
+(extend-type ChanReader
   ICloseable
-  (-close [this]
+  (close [this]
     (csp/close! (:chan this)))
   IBytesReader
-  (-peek [this]
+  (peek-buffer [this]
     (let [{:keys [data pos]} this]
       [data pos]))
-  (-seek [this pos]
+  (seek-buffer [this pos]
     (let [{:keys [data chan]} this]
-      (->chan-reader data pos chan)))
-  (-peek-more [this]
+      (->ChanReader data pos chan)))
+  (peek-more [this]
     (let [{:keys [data pos chan]} this]
       (p/let [b (csp/take chan)]
         (if-not b
           [this nil]
           (let [data (concat [data pos] b)]
-            [(->chan-reader data 0 chan) [data 0]]))))))
+            [(->ChanReader data 0 chan) [data 0]]))))))
 
-(defrecord chan-writer [chan ring])
+(defrecord ChanWriter [chan ring])
 
-(extend-type chan-writer
-  IDetachable
-  (-detach [this]
-    (:chan this))
+(extend-type ChanWriter
   ICloseable
-  (-close [this]
+  (close [this]
     (csp/close! (:chan this)))
   IBytesWriter
-  (-shutdown [this]
+  (shutdown [this]
     (let [{:keys [chan]} this]
       (csp/close! chan)
-      (->chan-writer chan nil)))
-  (-flush [this]
+      (->ChanWriter chan nil)))
+  (flush [this]
     (let [{:keys [chan ring]} this]
       (if (or (not ring) (empty? ring))
         this
@@ -471,30 +445,41 @@
             this
             (p/let [ok (csp/put chan b)]
               (assert ok)
-              (->chan-writer chan [])))))))
-  (-write [this b]
+              (->ChanWriter chan [])))))))
+  (push [this b]
     (let [{:keys [chan ring]} this]
       (assert ring)
-      (->chan-writer chan (conj ring b)))))
+      (->ChanWriter chan (conj ring b)))))
 
-(defn make-chan-reader [chan]
-  (->chan-reader (bmake 0) 0 chan))
+(defn chan-reader [ch]
+  (->ChanReader (bmake 0) 0 ch))
 
-(defn make-chan-writer [chan]
-  (->chan-writer chan []))
+(defn chan-writer [ch]
+  (->ChanWriter ch []))
 
 ;;; stream
 
-(defrecord stream [resource close-chan in-chan out-chan]
-  IDetachable
-  (-detach [this]
-    (:resource this))
+(defrecord Stream [close-chan in-chan out-chan]
   ICloseable
-  (-close [this]
+  (close [this]
     (csp/close! (:close-chan this))))
 
-(defn make-stream-reader [stream]
-  (make-chan-reader (:in-chan stream)))
+(defn create-stream [cch ich och cleanup]
+  (p/vthread
+   (-> (csp/take cch)
+       (p/finally
+         (fn [_ _]
+           (when ich (csp/close! ich))
+           (when och (csp/close! och))
+           (cleanup)))))
+  (->Stream cch ich och))
 
-(defn make-stream-writer [stream]
-  (make-chan-writer (:out-chan stream)))
+(defn stream-reader [s]
+  (chan-reader (:in-chan s)))
+
+(defn stream-writer [s]
+  (chan-writer (:out-chan s)))
+
+(defprotocol IStreamFactory
+  (stream [this]
+    "Return p/let-able stream."))

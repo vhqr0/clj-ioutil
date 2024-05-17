@@ -35,20 +35,8 @@
 
 ;;; array like
 
-;; Impl notes: pure sub/connect designed for reusable byte array, such
-;; as an input stream buffer; sub/concat also support ByteBuffer.
-
-(defn pure-sub
-  "Sub bytes, pure (always return new bytes)."
-  ([b]
-   (if-not (instance? ByteBuffer b)
-     (aclone (bytes b))
-     (let [^ByteBuffer bb b]
-       (pure-sub (.array bb) (.position bb) (.limit bb)))))
-  ([b s]
-   (pure-sub b s (blength b)))
-  ([b s e]
-   (Arrays/copyOfRange (bytes b) (int s) (int e))))
+;; Impl notes: sub/concat were designed for immutable byte array, also
+;; support ByteBuffer.
 
 (defn sub
   "Sub bytes, impure (reuse origin bytes if possible)."
@@ -60,19 +48,18 @@
   ([b s]
    (if (zero? s)
      b
-     (pure-sub b s (blength b))))
+     (Arrays/copyOfRange (bytes b) (int s) (int (blength b)))))
   ([b s e]
    (if (and (zero? s) (= e (blength b)))
      b
-     (pure-sub b s e))))
+     (Arrays/copyOfRange (bytes b) (int s) (int e)))))
 
-(defn- pure-concat-1
-  "Concat seq of [bytes start end length]."
+(defn- concat-1
   ([]
    (bmake 0))
   ([b]
    (let [[b s e n] b]
-     (pure-sub b s e)))
+     (sub b s e)))
   ([b1 b2]
    (let [[b1 s1 e1 n1] b1
          [b2 s2 e2 n2] b2
@@ -88,19 +75,9 @@
        (System/arraycopy b s nb i n))
      nb)))
 
-(defn- concat-1
-  ([]
-   (bmake 0))
-  ([b]
-   (let [[b s e n] b]
-     (sub b s e)))
-  ([b & bs]
-   (apply pure-concat-1 b bs)))
-
-(defn- concat->
-  "Coerce seq of bytes, [bytes [start [end]]] or BytesBuffer to seq
-  of [bytes start end length], remove empty bytes."
-  [bs]
+(defn concat
+  "Concat bytes, impure (reuse origin bytes if possible)."
+  [& bs]
   (letfn [(vector-> [[b s e]]
             (let [s (or s 0)
                   e (or e (blength b))]
@@ -116,15 +93,8 @@
           #(cond (vector? %) (vector-> %)
                  (instance? ByteBuffer %) (buffer-> %)
                  :else (let [e (blength %)] [% 0 e e])))
-         (remove #(zero? (% 3))))))
-
-(defn pure-concat
-  "Concat bytes, pure (always return new bytes)."
-  [& bs] (apply pure-concat-1 (concat-> bs)))
-
-(defn concat
-  "Concat bytes, impure (reuse origin bytes if possible)."
-  [& bs] (apply concat-1 (concat-> bs)))
+         (remove #(zero? (% 3)))
+         (apply concat-1))))
 
 (defn compare
   ([x y] (Arrays/compare (bytes x) (bytes y)))

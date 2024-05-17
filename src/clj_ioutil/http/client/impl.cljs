@@ -2,9 +2,16 @@
   (:require [clojure.string :as str]
             [promesa.core :as p]
             [clj-ioutil.cljs.streams :as s]
-            [clj-ioutil.http.status :as sta]
-            [clj-ioutil.http.data :as d]
-            [clj-ioutil.http.client.protocol :as pt]))
+            [clj-ioutil.http.util :as u]
+            [clj-ioutil.http.protocol :as pt]))
+
+(defn timeout-signal [timeout]
+  (let [controller (js/AbortController.)]
+    (js/setTimeout #(.abort controller) timeout)
+    (.-signal controller)))
+
+(defn map->http-headers [headers]
+  (js/Headers. (clj->js headers)))
 
 (defn http-headers->map [headers]
   (->> (.entries headers)
@@ -13,53 +20,91 @@
           [(keyword (str/lower-case k)) v]))
        (into {})))
 
-(def ^:dynamic *request-timeout* 5000)
+(def http-method
+  {:get     "GET"
+   :head    "HEAD"
+   :post    "POST"
+   :put     "PUT"
+   :delete  "DELETE"
+   :options "OPTIONS"
+   :trace   "TRACE"
+   :patch   "PATCH"})
 
-(defrecord client [defaults headers]
-  pt/IHTTPClient
-  (pt/-send [this url opts]
-    (let [{:keys [method headers body accept accept-type accept-keywordize
-                  mode credentials cache redirect referrer referrer-policy integrity priority keepalive]
-           :or {accept :text accept-keywordize false}}
-          (merge (:defaults this) opts)
-          headers (merge (:headers this) headers)
-          [headers body] (if-not (vector? body)
-                           [headers body]
-                           (let [[type body] body]
-                             [(assoc headers :content-type (d/content-type type))
-                              (d/clj->data body type)]))
-          controller (js/AbortController.)
-          request (->> (cond-> []
-                         method          (conj :method method)
-                         headers         (conj :headers headers)
-                         body            (conj :body body)
-                         mode            (conj :mode mode)
-                         credentials     (conj :credentials credentials)
-                         cache           (conj :cache cache)
-                         redirect        (conj :redirect redirect)
-                         referrer        (conj :referrer referrer)
-                         referrer-policy (conj :referrer-policy referrer-policy)
-                         integrity       (conj :integrity integrity)
-                         priority        (conj :priority priority)
-                         keepalive       (conj :keepalive keepalive))
-                       (apply s/make-http-request url :signal (.-signal controller)))]
-      (js/setTimeout #(.abort controller) *request-timeout*)
-      (p/let [response (apply s/http-fetch url (apply concat opts))]
-        (let [status (.-status response)]
-          (if-not (sta/success? status)
-            (p/rejected (ex-info "http status error" {:type :http-status :status status}))
-            (p/let [headers (http-headers->map (.-headers response))
-                    body (case accept
-                           :discard nil
-                           :stream (s/readable-stream->read-stream (.-body response))
-                           :bin (.arrayBuffer response)
-                           :text (.text response))]
-              (if-not (and (= accept :text) accept-type)
-                {:status status :headers headers :body body}
-                (let [content-type (str/replace (:content-type headers) #";.*" "")]
-                  (if-not (= content-type (d/content-type accept-type))
-                    (p/rejected (ex-info "http content type error" {:type :http-content-type :content-type content-type}))
-                    {:status status :headers headers :body (d/data->clj body accept-type :keywordize accept-keywordize)}))))))))))
+(def http-mode
+  {:cors "cors"
+   :no-cors "no-cors"
+   :same-oirgin "same-origin"
+   :navigate "navigate"})
 
-(defn make-client [& {:keys [defaults headers]}]
-  (->client defaults headers))
+(def http-credentials
+  {:omit "omit"
+   :same-origin "same-origin"
+   :include "include"})
+
+(def http-cache
+  {:default "default"
+   :no-store "no-store"
+   :reload "reload"
+   :no-cache "no-cache"
+   :force-cache "force-cache"
+   :only-if-cached "only-if-cached"})
+
+(def http-redirect
+  {:follow "follow"
+   :error "error"
+   :manual "manual"})
+
+(def http-referrer-policy
+  {:no-referrer "no-referrer"
+   :no-referrer-when-downgrade "no-referrer-when-downgrade"
+   :same-origin "same-origin"
+   :strict-origin "strict-origin"
+   :origin-when-cross-origin "origin-when-cross-origin"
+   :strict-origin-when-corss-origin "strict-origin-when-cross-origin"
+   :unsafe-url "unsafe-url"})
+
+(def http-prioirty
+  {:high "high"
+   :low "low"
+   :auto "auto"})
+
+(def ^:dynamic *timeout* 5000)
+
+(defrecord HttpClient [opts]
+  pt/IHttpClient
+  (pt/do-http-fetch [this url opts]
+    (let [{:keys [method headers body body-type accept accept-type accept-keywordize
+                  mode credentials cache redirect referrer referrer-policy integrity priority keepalive signal]
+           :or {accept :text accept-keywordize false redirect :follow signal *timeout*}}
+          (merge (:opts this) opts)
+          [headers body] (u/process-request-data headers body body-type)
+          req (->> (cond-> {}
+                     method (assoc "method" (http-method method))
+                     headers (assoc "headers" (map->http-headers headers))
+                     body (assoc "body" body)
+                     mode (assoc "mode" (http-mode mode))
+                     credentials (assoc "credentials" (http-credentials credentials))
+                     cache (assoc "cache" (http-cache cache))
+                     redirect (assoc "redirect" (http-redirect redirect))
+                     referrer (assoc "referrer" referrer)
+                     referrer-policy (assoc "referrerPolicy" (http-referrer-policy referrer-policy))
+                     integrity (assoc "integrity" integrity)
+                     priority (assoc "priority" (http-prioirty priority))
+                     keepalive (assoc "keepalive" keepalive)
+                     signal (assoc "signal" (if-not (number? signal) signal (timeout-signal signal))))
+                   clj->js
+                   (js/Request. url))]
+      (p/let [resp (js/fetch req)]
+        (let [status (u/check-status (.-status resp))
+              headers (http-headers->map (.-headers resp))]
+          (p/let [body (case accept
+                         :discard nil
+                         :stream (s/readable-stream->read-stream (.-body resp))
+                         :bin (.arrayBuffer resp)
+                         :text (.text resp))]
+            {:status status
+             :headers headers
+             :body (u/process-response-data headers body accept accept-type accept-keywordize)}))))))
+
+(defn client [& {:as opts}]
+  (->HttpClient opts))

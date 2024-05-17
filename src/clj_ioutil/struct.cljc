@@ -40,23 +40,23 @@
         (p/recur writer (rest them))))))
 
 (defn bytes->struct [b spec]
-  (let [reader (b/make-reader b)]
+  (let [reader (b/buffered-reader b)]
     (p/let [[reader it] (read-one-struct reader spec)]
       it)))
 
 (defn bytes->many-struct [b spec]
-  (let [reader (b/make-reader b)]
+  (let [reader (b/buffered-reader b)]
     (p/let [[reader them] (read-many-struct reader spec)]
       them)))
 
 (defn struct->bytes [it spec]
-  (let [writer (b/make-writer)]
+  (let [writer (b/buffered-writer)]
     (p/let [writer (write-struct writer spec it)
             writer (b/flush writer)]
       (b/detach writer))))
 
 (defn many-struct->bytes [them spec]
-  (let [writer (b/make-writer)]
+  (let [writer (b/buffered-writer)]
     (p/let [writer (write-many-struct writer spec them)
             writer (b/flush writer)]
       (b/detach writer))))
