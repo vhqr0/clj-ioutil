@@ -75,6 +75,25 @@
 (defmethod make-algo-params :ec-key-import [type opts]
   (make-algo-params :ec-key-gen opts))
 
+;; Impl notes: curve 25519/448 were standardized recently (2024.03),
+;; though they were been experimental for years.
+;;
+;; [https://github.com/w3c/webcrypto/pull/362]
+;; [https://github.com/w3c/webcrypto/issues/196]
+;; [https://wicg.github.io/webcrypto-secure-curves/]
+
+(defmethod make-algo-params :ed25519 [type opts]
+  {"name" "Ed25519"})
+
+(defmethod make-algo-params :ed448 [type opts]
+  {"name" "Ed448"})
+
+(defmethod make-algo-params :x25519 [type opts]
+  {"name" "X25519"})
+
+(defmethod make-algo-params :x448 [type opts]
+  {"name" "X448"})
+
 ;;;; rsa
 
 ;; salt-length: Math.ceil((keySizeInBits - 1) / 8) - digestSizeInBytes - 2;
@@ -198,6 +217,9 @@
       (js/crypto.subtle.wrapKey
        (key-format format) key
        wrap-key wrap-params))))
+
+(defn derive-bits [params key length]
+  (js/crypto.subtle.deriveBits params key length))
 
 (comment
   (do
