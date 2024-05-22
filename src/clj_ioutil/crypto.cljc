@@ -1,5 +1,7 @@
 (ns clj-ioutil.crypto
-  (:require [clj-ioutil.crypto.impl :as impl]))
+  (:require [promesa.core :as p]
+            [clj-ioutil.bytes :as b]
+            [clj-ioutil.crypto.impl :as impl]))
 
 ;;; digest
 
@@ -22,67 +24,76 @@
 (comment
   (do
     (def res (atom nil))
-    (-> (promesa.core/let [m (bytes->digest (clj-ioutil.bytes/str->bytes "hello") :sha384)]
+    (-> (p/let [m (bytes->digest (b/str->bytes "hello") :sha384)]
           (reset! res m))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def res (atom nil))
-    (-> (promesa.core/let [m (bytes->hmac (clj-ioutil.bytes/str->bytes "hello") (clj-ioutil.bytes/rand-bytes 4) :sha384)]
+    (-> (p/let [m (bytes->hmac (b/str->bytes "hello") (b/rand-bytes 4) :sha384)]
           (reset! res m))
-        (promesa.core/catch #(reset! res %)))))
+        (p/catch #(reset! res %)))))
 
-;;; aead
+;;; cipher
 
-(def aead-algos #{:aes128gcm :aes256gcm :chacha20poly1305})
+(def cipher-algos
+  #{:aes128cbc :aes192cbc :aes256cbc
+    :aes128ctr :aes192ctr :aes256ctr
+    :aes128gcm :aes192gcm :aes256gcm
+    :chacha20poly1305})
 
-(def aead-key-size
-  {:aes128gcm 16
-   :aes256gcm 32
+(def cipher-key-size
+  {:aes128cbc 16 :aes192cbc 24 :aes256cbc 32
+   :aes128ctr 16 :aes192ctr 24 :aes256ctr 32
+   :aes128gcm 16 :aes192gcm 24 :aes256gcm 32
    :chacha20poly1305 32})
 
-(def aead-iv-size
-  {:aes128gcm 12
-   :aes256gcm 12
+(def cipher-iv-size
+  {:aes128cbc 16 :aes192cbc 16 :aes256cbc 16
+   :aes128ctr 16 :aes192ctr 16 :aes256ctr 16
+   :aes128gcm 12 :aes192gcm 12 :aes256gcm 12
    :chacha20poly1305 12})
 
-(def aead-tag-size
-  {:aes128gcm 16
-   :aes256gcm 16
+(def cipher-tag-size
+  {:aes128ctr  0 :aes192ctr  0 :aes256ctr  0
+   :aes128gcm 16 :aes192gcm 16 :aes256gcm 16
    :chacha20poly1305 16})
 
 ;; key: bytes or platform native secret key
-(def aead-key->bytes "[key algo]" impl/aead-key->bytes)
-(def bytes->aead-key "[data algo]" impl/bytes->aead-key)
-(def aead-encrypt "[data key iv algo & {:keys [aad]}]" impl/aead-encrypt)
-(def aead-decrypt "[data key iv algo & {:keys [aad]}]" impl/aead-decrypt)
+(def cipher-generate-key "[algo]" impl/cipher-generate-key)
+(def cipher-key->bytes "[key algo]" impl/cipher-key->bytes)
+(def bytes->cipher-key "[data algo]" impl/bytes->cipher-key)
+(def cipher-encrypt "[data key iv algo & {:keys [aad]}]" impl/cipher-encrypt)
+(def cipher-decrypt "[data key iv algo & {:keys [aad]}]" impl/cipher-decrypt)
 
 (comment
+  (def a :aes256cbc)
+  (def a :aes256ctr)
   (def a :aes256gcm)
   (def a :chacha20poly1305)
   (do
     (def res (atom nil))
-    (-> (promesa.core/let [k (bytes->aead-key (clj-ioutil.bytes/rand-bytes 32) a)]
+    (-> (p/let [k (cipher-generate-key a)]
           (reset! res k))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def k @res)
     (reset! res nil)
-    (-> (promesa.core/let [d (aead-key->bytes k a)]
+    (-> (p/let [d (cipher-key->bytes k a)]
           (reset! res d))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (reset! res nil)
-    (def iv (clj-ioutil.bytes/rand-bytes 12))
-    (def d (clj-ioutil.bytes/str->bytes "hello"))
-    (-> (promesa.core/let [e (aead-encrypt d k iv a)]
+    (def iv (b/rand-bytes (cipher-iv-size a)))
+    (def d (b/str->bytes "hello"))
+    (-> (p/let [e (cipher-encrypt d k iv a)]
           (reset! res e))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def e @res)
     (reset! res nil)
-    (-> (promesa.core/let [d (aead-decrypt e k iv a)]
-          (reset! res (clj-ioutil.bytes/bytes->str d)))
-        (promesa.core/catch #(reset! res %)))))
+    (-> (p/let [d (cipher-decrypt e k iv a)]
+          (reset! res (b/bytes->str d)))
+        (p/catch #(reset! res %)))))
 
 ;;; ec
 
@@ -139,117 +150,117 @@
 (comment
   (do
     (def res (atom nil))
-    (-> (promesa.core/let [kp (ecdh-generate-keypair :p384)]
+    (-> (p/let [kp (ecdh-generate-keypair :p384)]
           (reset! res kp))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def pri (first @res))
     (def pub (last @res)))
   ;; test pri fac
   (do
     (reset! res nil)
-    (-> (promesa.core/let [d (ecdh-pri->bytes pri)]
+    (-> (p/let [d (ecdh-pri->bytes pri)]
           (reset! res d))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
-    (-> (promesa.core/let [k (bytes->ecdh-pri @res :p384)]
+    (-> (p/let [k (bytes->ecdh-pri @res :p384)]
           (reset! res k))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   ;; test pub fac
   (do
     (reset! res nil)
-    (-> (promesa.core/let [d (ecdh-pub->bytes pub)]
+    (-> (p/let [d (ecdh-pub->bytes pub)]
           (reset! res d))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
-    (-> (promesa.core/let [k (bytes->ecdh-pub @res :p384)]
+    (-> (p/let [k (bytes->ecdh-pub @res :p384)]
           (reset! res k))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   ;; test ke
   (do
     (reset! res nil)
-    (-> (promesa.core/let [k (ecdh-key-exchange pub pri)]
+    (-> (p/let [k (ecdh-key-exchange pub pri)]
           (reset! res k))
-        (promesa.core/catch #(reset! res nil)))))
+        (p/catch #(reset! res nil)))))
 
 (comment
   (do
     (def res (atom nil))
-    (-> (promesa.core/let [kp (ecdsa-generate-keypair :p384)]
+    (-> (p/let [kp (ecdsa-generate-keypair :p384)]
           (reset! res kp))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def pri (first @res))
     (def pub (last @res))
-    (def d (clj-ioutil.bytes/str->bytes "hello")))
+    (def d (b/str->bytes "hello")))
   ;; test sign
   (do
     (reset! res nil)
-    (-> (promesa.core/let [s (ecdsa-sign d pri :sha384)]
+    (-> (p/let [s (ecdsa-sign d pri :sha384)]
           (reset! res s))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def s @res)
     (reset! res nil)
-    (-> (promesa.core/let [ok (ecdsa-verify d s pub :sha384)]
+    (-> (p/let [ok (ecdsa-verify d s pub :sha384)]
           (reset! res ok))
-        (promesa.core/catch #(reset! res %)))))
+        (p/catch #(reset! res %)))))
 
 (comment
   (do
     (def res (atom nil))
-    (-> (promesa.core/let [kp (x448-generate-keypair)]
+    (-> (p/let [kp (x448-generate-keypair)]
           (reset! res kp))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def pri (first @res))
     (def pub (last @res)))
   ;; test pri fac
   (do
     (reset! res nil)
-    (-> (promesa.core/let [d (x448-pri->bytes pri)]
+    (-> (p/let [d (x448-pri->bytes pri)]
           (reset! res d))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
-    (-> (promesa.core/let [k (bytes->x448-pri @res)]
+    (-> (p/let [k (bytes->x448-pri @res)]
           (reset! res k))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   ;; test pub fac
   (do
     (reset! res nil)
-    (-> (promesa.core/let [d (x448-pub->bytes pub)]
+    (-> (p/let [d (x448-pub->bytes pub)]
           (reset! res d))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
-    (-> (promesa.core/let [k (bytes->x448-pub @res)]
+    (-> (p/let [k (bytes->x448-pub @res)]
           (reset! res k))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   ;; test ke
   (do
     (reset! res nil)
-    (-> (promesa.core/let [k (x448-key-exchange pub pri)]
+    (-> (p/let [k (x448-key-exchange pub pri)]
           (reset! res k))
-        (promesa.core/catch #(reset! res nil)))))
+        (p/catch #(reset! res nil)))))
 
 (comment
   (do
     (def res (atom nil))
-    (-> (promesa.core/let [kp (ed448-generate-keypair)]
+    (-> (p/let [kp (ed448-generate-keypair)]
           (reset! res kp))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def pri (first @res))
     (def pub (last @res))
-    (def d (clj-ioutil.bytes/str->bytes "hello")))
+    (def d (b/str->bytes "hello")))
   ;; test sign
   (do
     (reset! res nil)
-    (-> (promesa.core/let [s (ed448-sign d pri)]
+    (-> (p/let [s (ed448-sign d pri)]
           (reset! res s))
-        (promesa.core/catch #(reset! res %))))
+        (p/catch #(reset! res %))))
   (do
     (def s @res)
     (reset! res nil)
-    (-> (promesa.core/let [ok (ed448-verify d s pub)]
+    (-> (p/let [ok (ed448-verify d s pub)]
           (reset! res ok))
-        (promesa.core/catch #(reset! res %)))))
+        (p/catch #(reset! res %)))))

@@ -98,31 +98,41 @@
                 (import-key key #js {"name" "HMAC" "hash" (digest-algo algo)} :sign))]
     (sign data key "HMAC")))
 
-(defn aead-key->bytes [key algo]
+(def cipher-algo
+  {:aes128cbc #js {"name" "AES-CBC" "length" 128}
+   :aes192cbc #js {"name" "AES-CBC" "length" 192}
+   :aes256cbc #js {"name" "AES-CBC" "length" 256}
+   :aes128ctr #js {"name" "AES-CTR" "length" 128}
+   :aes192ctr #js {"name" "AES-CTR" "length" 192}
+   :aes256ctr #js {"name" "AES-CTR" "length" 256}
+   :aes128gcm #js {"name" "AES-GCM" "length" 128}
+   :aes192gcm #js {"name" "AES-GCM" "length" 192}
+   :aes256gcm #js {"name" "AES-GCM" "length" 256}})
+
+(defn cipher-generate-key [algo]
+  (generate-key (cipher-algo algo) [:encrypt :decrypt :wrap-key :unwrap-key] :extractable true))
+
+(defn cipher-key->bytes [key algo]
   (export-key key))
 
-(defn bytes->aead-key [data algo]
-  (import-key
-   data
-   (case algo
-     :aes128gcm #js {"name" "AES-GCM" "length" 128}
-     :aes256gcm #js {"name" "AES-GCM" "length" 256})
-   [:encrypt :decrypt :wrap-key :unwrap-key]
-   :extractable true))
+(defn bytes->cipher-key [data algo]
+  (import-key data (cipher-algo algo) [:encrypt :decrypt :wrap-key :unwrap-key] :extractable true))
 
-(defn- aead-crypt [cryptfn data key iv algo & {:keys [aad]}]
+(defn- cipher-crypt [cryptfn data key iv algo & {:keys [aad]}]
   (p/let [key (if-not (instance? js/ArrayBuffer key)
                 key
-                (bytes->aead-key key algo))]
+                (bytes->cipher-key key algo))]
     (cryptfn
      data key
      (case algo
-       (:aes128gcm :aes256gcm) (if-not aad
-                                 #js {"name" "AES-GCM" "iv" iv}
-                                 #js {"name" "AES-GCM" "iv" iv "additionalData" aad})))))
+       (:aes128cbc :aes192cbc :aes256cbc) #js {"name" "AES-CBC" "iv" iv}
+       (:aes128ctr :aes192ctr :aes256ctr) #js {"name" "AES-CTR" "counter" iv "length" 64}
+       (:aes128gcm :aes192gcm :aes256gcm) (if-not aad
+                                            #js {"name" "AES-GCM" "iv" iv}
+                                            #js {"name" "AES-GCM" "iv" iv "additionalData" aad})))))
 
-(def aead-encrypt (partial aead-crypt encrypt))
-(def aead-decrypt (partial aead-crypt decrypt))
+(def cipher-encrypt (partial cipher-crypt encrypt))
+(def cipher-decrypt (partial cipher-crypt decrypt))
 
 (def ec-algo
   {:p256 "P-256"

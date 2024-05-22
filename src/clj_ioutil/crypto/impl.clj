@@ -91,11 +91,6 @@
         (.updateAAD c ^ByteBuffer aad)))
     (.doFinal c data)))
 
-(def encrypt (partial crypt :encrypt))
-(def decrypt (partial crypt :decrypt))
-(def wrap-key (partial crypt :wrap))
-(def unwrap-key (partial crypt :unwrap))
-
 ;;; ke/sign
 
 ;; algo: ECDH X25519 X448
@@ -139,25 +134,36 @@
 (defn bytes->digest [data algo] (p/vthread (digest data (digest-algo algo))))
 (defn bytes->hmac [data key algo] (p/vthread (hmac data (if-not (bytes? key) key (SecretKeySpec. key "Hmac")) (hmac-algo algo))))
 
-(defn aead-key->bytes [^SecretKeySpec key algo]
+(defn cipher-generate-key [algo]
+  (p/vthread
+   (case algo
+     (:aes128cbc :aes128ctr :aes128gcm) (generate-key "AES" :params 128)
+     (:aes192cbc :aes192ctr :aes192gcm) (generate-key "AES" :params 192)
+     (:aes256cbc :aes256ctr :aes256gcm) (generate-key "AES" :params 256)
+     :chacha20poly1305                  (generate-key "ChaCha20"))))
+
+(defn cipher-key->bytes [^SecretKeySpec key algo]
   (p/vthread
    (.getEncoded key)))
 
-(defn bytes->aead-key [data algo]
+(defn bytes->cipher-key [data algo]
   (p/vthread
    (case algo
-     :aes128gcm        (do (assert (b/blength data) 16) (SecretKeySpec. data "AES"))
-     :aes256gcm        (do (assert (b/blength data) 32) (SecretKeySpec. data "AES"))
-     :chacha20poly1305 (do (assert (b/blength data) 32) (SecretKeySpec. data "ChaCha20")))))
+     (:aes128cbc :aes128ctr :aes128gcm) (do (assert (b/blength data) 16) (SecretKeySpec. data "AES"))
+     (:aes192cbc :aes192ctr :aes192gcm) (do (assert (b/blength data) 24) (SecretKeySpec. data "AES"))
+     (:aes256cbc :aes256ctr :aes256gcm) (do (assert (b/blength data) 32) (SecretKeySpec. data "AES"))
+     :chacha20poly1305                  (do (assert (b/blength data) 32) (SecretKeySpec. data "ChaCha20")))))
 
-(defn- aead-crypt [mode data key iv algo & {:keys [aad]}]
-  (p/let [key (if-not (bytes? key) key (bytes->aead-key data algo))]
+(defn- cipher-crypt [mode data key iv algo & {:keys [aad]}]
+  (p/let [key (if-not (bytes? key) key (bytes->cipher-key data algo))]
     (case algo
-      (:aes128gcm :aes256gcm) (crypt mode data key "AES/GCM/NoPadding" :aad aad :params (GCMParameterSpec. 128 iv))
-      :chacha20poly1305       (crypt mode data key "Chacha20-Poly1305" :aad aad :params (IvParameterSpec. iv)))))
+      (:aes128cbc :aes192cbc :aes256cbc) (crypt mode data key "AES/CBC/PKCS5Padding" :aad aad :params (IvParameterSpec. iv))
+      (:aes128ctr :aes192ctr :aes256ctr) (crypt mode data key "AES/CTR/NoPadding"    :aad aad :params (IvParameterSpec. iv))
+      (:aes128gcm :aes192gcm :aes256gcm) (crypt mode data key "AES/GCM/NoPadding"    :aad aad :params (GCMParameterSpec. 128 iv))
+      :chacha20poly1305                  (crypt mode data key "Chacha20-Poly1305"    :aad aad :params (IvParameterSpec. iv)))))
 
-(def aead-encrypt (partial aead-crypt :encrypt))
-(def aead-decrypt (partial aead-crypt :decrypt))
+(def cipher-encrypt (partial cipher-crypt :encrypt))
+(def cipher-decrypt (partial cipher-crypt :decrypt))
 
 (def ec-algo
   {:p256 "SECP256R1"
