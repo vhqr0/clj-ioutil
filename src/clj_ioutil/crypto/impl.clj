@@ -3,79 +3,16 @@
             [clj-ioutil.bytes :as b])
   (:import java.nio.ByteBuffer
            [java.security
-            MessageDigest Key PublicKey PrivateKey KeyPair KeyPairGenerator KeyFactory Signature]
+            Key PublicKey PrivateKey KeyPair KeyPairGenerator KeyFactory
+            MessageDigest Signature]
            [java.security.spec
             EncodedKeySpec X509EncodedKeySpec PKCS8EncodedKeySpec
-            AlgorithmParameterSpec ECGenParameterSpec RSAKeyGenParameterSpec MGF1ParameterSpec PSSParameterSpec]
+            AlgorithmParameterSpec ECGenParameterSpec]
            [javax.crypto
             SecretKey KeyGenerator KeyAgreement Mac Cipher]
            [javax.crypto.spec
             SecretKeySpec
-            IvParameterSpec GCMParameterSpec ChaCha20ParameterSpec
-            OAEPParameterSpec PSource$PSpecified]))
-
-;;; params
-
-(defmulti make-algo-params (fn [type opts] type))
-
-(defn algo-params [type & {:as opts}]
-  (make-algo-params type opts))
-
-;;;; cipher
-
-;; iv: bytes
-(defmethod make-algo-params :iv [type {:keys [iv]}]
-  (IvParameterSpec. iv))
-
-;; iv: 12 bytes
-;; tlen: 32, 64, 96, ..., 128
-(defmethod make-algo-params :gcm
-  [type {:keys [tlen iv] :or {tlen 128}}]
-  (GCMParameterSpec. tlen (or iv (b/rand-bytes 12))))
-
-;; ChaCha20 Counter: This can be set to any number, but will usually
-;; be zero or one. It makes sense to use one if we use the zero block
-;; for something else, such as generating a one-time authenticator key
-;; as part of an AEAD algorithm.
-;;
-;; [https://datatracker.ietf.org/doc/html/rfc7539]
-
-;; nonce: 12 bytes
-(defmethod make-algo-params :chacha20
-  [type {:keys [nonce counter] :or {counter 1}}]
-  (ChaCha20ParameterSpec. (or nonce (b/rand-bytes 12)) counter))
-
-;;;; ec
-
-;; std-name: SECP256R1 SECP384R1 SECP521R1
-(defmethod make-algo-params :ec-gen [type {:keys [std-name]}]
-  (ECGenParameterSpec. std-name))
-
-;;;; rsa
-
-(defmethod make-algo-params :rsa-key-gen
-  [type {:keys [keysize public-exponent key-params]
-         :or {keysize 4096 public-exponent RSAKeyGenParameterSpec/F4}}]
-  (if-not key-params
-    (RSAKeyGenParameterSpec. keysize public-exponent)
-    (RSAKeyGenParameterSpec. keysize public-exponent ^AlgorithmParameterSpec key-params)))
-
-;; md-name: SHA256 SHA384 SHA512 SHA512-224 SHA512-256
-(defmethod make-algo-params :mgf1 [type {:keys [md-name]}]
-  (MGF1ParameterSpec. md-name))
-
-;; salt-len: Math.ceil((keySizeInBits - 1) / 8) - digestSizeInBytes - 2;
-(defmethod make-algo-params :pss
-  [type {:keys [md-name mgf-name mgf-params salt-len trailer-field]
-         :or {mgf-name "MGF1" trailer-field PSSParameterSpec/TRAILER_FIELD_BC}}]
-  (let [mgf-params (or mgf-params (algo-params :mgf1 :md-name md-name))]
-    (PSSParameterSpec. md-name mgf-name mgf-params salt-len trailer-field)))
-
-(defmethod make-algo-params :oaep
-  [type {:keys [md-name mgf-name mgf-params p-src]
-         :or {mgf-name "MGF1" p-src PSource$PSpecified/DEFAULT}}]
-  (let [mgf-params (or mgf-params (algo-params :mgf1 :md-name md-name))]
-    (OAEPParameterSpec. md-name mgf-name mgf-params p-src)))
+            IvParameterSpec GCMParameterSpec]))
 
 ;;; key
 
@@ -107,6 +44,7 @@
     :x509  (X509EncodedKeySpec. data)
     :pkcs8 (PKCS8EncodedKeySpec. data)))
 
+;; algo: RSA EC X25519 X448 Ed25519 Ed448
 (defn key->data [^Key key algo format]
   (let [^KeyFactory f (KeyFactory/getInstance algo)]
     (.getEncoded ^EncodedKeySpec (.getKeySpec f key (key-format format)))))
@@ -215,9 +153,8 @@
 (defn- aead-crypt [mode data key iv algo & {:keys [aad]}]
   (p/let [key (if-not (bytes? key) key (bytes->aead-key data algo))]
     (case algo
-      :aes128gcm        (crypt mode data key "AES/GCM/NoPadding" :aad aad :params (algo-params :gcm :iv iv))
-      :aes256gcm        (crypt mode data key "AES/GCM/NoPadding" :aad aad :params (algo-params :gcm :iv iv))
-      :chacha20poly1305 (crypt mode data key "Chacha20-Poly1305" :aad aad :params (algo-params :iv :iv iv)))))
+      (:aes128gcm :aes256gcm) (crypt mode data key "AES/GCM/NoPadding" :aad aad :params (GCMParameterSpec. 128 iv))
+      :chacha20poly1305       (crypt mode data key "Chacha20-Poly1305" :aad aad :params (IvParameterSpec. iv)))))
 
 (def aead-encrypt (partial aead-crypt :encrypt))
 (def aead-decrypt (partial aead-crypt :decrypt))
@@ -229,7 +166,7 @@
 
 (defn ec-generate-keypair [algo]
   (p/vthread
-   (generate-keypair "EC" :params (algo-params :ec-gen :std-name (ec-algo algo)))))
+   (generate-keypair "EC" :params (ECGenParameterSpec. (ec-algo algo)))))
 
 (defn ec-pub->bytes [pub] (p/vthread (key->data pub "EC" :x509)))
 (defn ec-pri->bytes [pri] (p/vthread (key->data pri "EC" :pkcs8)))

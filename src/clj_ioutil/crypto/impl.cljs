@@ -2,198 +2,6 @@
   (:require [promesa.core :as p]
             [clj-ioutil.bytes :as b]))
 
-;;; params
-
-(defmulti make-algo-params
-  (fn [type opts] type))
-
-(defn algo-params [type & {:as opts}]
-  (clj->js (make-algo-params type opts)))
-
-;;;; hmac
-
-;; hash: SHA-256, SHA-384, SHA-512
-;; length: length of bits
-(defmethod make-algo-params :hmac-key-gen [type {:keys [hash length]}]
-  (cond-> {"name" "HMAC" "hash" hash}
-    length (assoc "length" length)))
-
-;; same as hmac-key-gen
-(defmethod make-algo-params :hmac-import [type opts]
-  (make-algo-params :hmac-key-gen opts))
-
-;;;; kdf
-
-;; hash: SHA-256, SHA-384, SHA-512
-;; salt: bytes
-;; info: bytes
-(defmethod make-algo-params :hkdf [type {:keys [hash salt info]}]
-  {"name" "HKDF" "hash" hash "salt" salt "info" info})
-
-;; hash: SHA-256, SHA-384, SHA-512
-;; salt: 16 bytes
-;; iterations: int
-(defmethod make-algo-params :pbkdf2 [type {:keys [hash salt iterations]}]
-  {"name" "PBKDF2" "hash" hash "salt" salt "iterations" iterations})
-
-;;;; cipher
-
-;; iv: 16 bytes
-(defmethod make-algo-params :aes-cbc [type {:keys [iv]}]
-  {"name" "AES-CBC" "iv" (or iv (b/rand-bytes 16))})
-
-;; counter: 16 bytes
-;; length: 0..128
-(defmethod make-algo-params :aes-ctr [type {:keys [counter length] :or {length 64}}]
-  {"name" "AES-CTR"
-   "counter" (or counter (b/rand-bytes 16))
-   "length" length})
-
-;; iv: 12 bytes
-;; additional-data: bytes
-;; tag-length: 32, 64, 96, ..., 128
-(defmethod make-algo-params :aes-gcm [type {:keys [iv additional-data tag-length]}]
-  (cond-> {"name" "AES-GCM"
-           "iv" (or iv (b/rand-bytes 12))}
-    additional-data (assoc "additionalData" additional-data)
-    tag-length (assoc "tagLength" tag-length)))
-
-;; name: AES-CBC, AES-CTR, AES-GCM, AES-KW
-;; length: 128, 192, 256
-(defmethod make-algo-params :aes-key-gen [type {:keys [name length]}]
-  {"name" name "length" length})
-
-(defmethod make-algo-params :aes-cbc-key-gen [type opts]
-  (make-algo-params :aes-key-gen (assoc opts :name "AES-CBC")))
-
-(defmethod make-algo-params :aes-ctr-key-gen [type opts]
-  (make-algo-params :aes-key-gen (assoc opts :name "AES-CTR")))
-
-(defmethod make-algo-params :aes-gcm-key-gen [type opts]
-  (make-algo-params :aes-key-gen (assoc opts :name "AES-GCM")))
-
-(defmethod make-algo-params :aes-kw-key-gen [type opts]
-  (make-algo-params :aes-key-gen (assoc opts :name "AES-KW")))
-
-;;;; ec
-
-;; public: ec public key
-(defmethod make-algo-params :ecdh [type {:keys [public]}]
-  {"name" "ECDH" "public" public})
-
-;; hash: SHA-256, SHA-384, SHA-512
-(defmethod make-algo-params :ecdsa [type {:keys [hash]}]
-  {"name" "ECDSA" "hash" hash})
-
-;; name: ECDSA, ECDH
-;; named-curve: P-256, P-384, P-521
-(defmethod make-algo-params :ec-key-gen [type {:keys [name named-curve]}]
-  {"name" name "namedCurve" named-curve})
-
-(defmethod make-algo-params :ecdh-key-gen [type opts]
-  (make-algo-params :ec-key-gen (assoc opts :name "ECDH")))
-
-(defmethod make-algo-params :ecdsa-key-gen [type opts]
-  (make-algo-params :ec-key-gen (assoc opts :name "ECDSA")))
-
-;; same as ec-key-gen
-(defmethod make-algo-params :ec-key-import [type opts]
-  (make-algo-params :ec-key-gen opts))
-
-(defmethod make-algo-params :ecdh-key-import [type opts]
-  (make-algo-params :ec-key-import (assoc opts :name "ECDH")))
-
-(defmethod make-algo-params :ecdsa-key-import [type opts]
-  (make-algo-params :ec-key-import (assoc opts :name "ECDSA")))
-
-;; Impl notes: curve 25519/448 were standardized recently (2024.03),
-;; though they were been experimental for years.
-;;
-;; [https://github.com/w3c/webcrypto/pull/362]
-;; [https://github.com/w3c/webcrypto/issues/196]
-;; [https://wicg.github.io/webcrypto-secure-curves/]
-
-(defmethod make-algo-params :x25519 [type {:keys [public]}]
-  {"name" "X25519" "public" public})
-
-(defmethod make-algo-params :x448 [type {:keys [public]}]
-  {"name" "X448" "public" public})
-
-(defmethod make-algo-params :x25519-key-gen [type opts]
-  {"name" "X25519"})
-
-(defmethod make-algo-params :x448-key-gen [type opts]
-  {"name" "X448"})
-
-(defmethod make-algo-params :x25519-key-import [type opts]
-  {"name" "X25519"})
-
-(defmethod make-algo-params :x448-key-import [type opts]
-  {"name" "X448"})
-
-(defmethod make-algo-params :ed25519 [type opts]
-  {"name" "Ed25519"})
-
-(defmethod make-algo-params :ed448 [type opts]
-  {"name" "Ed448"})
-
-(defmethod make-algo-params :ed25519-key-gen [type opts]
-  {"name" "Ed25519"})
-
-(defmethod make-algo-params :ed448-key-gen [type opts]
-  {"name" "Ed448"})
-
-(defmethod make-algo-params :ed25519-key-import [type opts]
-  {"name" "Ed25519"})
-
-(defmethod make-algo-params :ed448-key-import [type opts]
-  {"name" "Ed448"})
-
-;;;; rsa
-
-;; salt-length: Math.ceil((keySizeInBits - 1) / 8) - digestSizeInBytes - 2;
-(defmethod make-algo-params :rsa-pss [type {:keys [salt-length]}]
-  {"name" "RSA-PSS" "saltLength" salt-length})
-
-;; label: bytes
-(defmethod make-algo-params :rsa-oaep [type {:keys [label]}]
-  (cond-> {"name" "RSA-OAEP"}
-    label (assoc "label" label)))
-
-(def bytes-65537 (b/bmake [1 0 1]))
-
-;; name: RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP
-;; modulus-length: >=2048
-;; public-exponent: bytes, usually 65537(0x010001)
-;; hash: SHA-256, SHA-384, SHA-512
-(defmethod make-algo-params :rsa-hashed-key-gen
-  [type {:keys [name modulus-length public-exponent hash]
-         :or {modulus-length 4096 public-exponent bytes-65537}}]
-  {"name" name "modulusLength" modulus-length "publicExponent" public-exponent "hash" hash})
-
-(defmethod make-algo-params :rsassa-pkcs1-hashed-key-gen [type opts]
-  (make-algo-params :rsa-hashed-key-gen (assoc opts :name "RSASSA-PKCS1-v1_5")))
-
-(defmethod make-algo-params :rsa-pss-hashed-key-gen [type opts]
-  (make-algo-params :rsa-hashed-key-gen (assoc opts :name "RSA-PSS")))
-
-(defmethod make-algo-params :rsa-oaep-hashed-key-gen [type opts]
-  (make-algo-params :rsa-hashed-key-gen (assoc opts :name "RSA-OAEP")))
-
-;; name: RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP
-;; hash: SHA-256, SHA-384, SHA-512
-(defmethod make-algo-params :rsa-hashed-import [type {:keys [name hash]}]
-  {"name" name "hash" hash})
-
-(defmethod make-algo-params :rsassa-pkcs1-hashed-import [type opts]
-  (make-algo-params :rsa-hashed-import (assoc opts :name "RSASSA-PKCS1-v1_5")))
-
-(defmethod make-algo-params :rsa-pss-hashed-import [type opts]
-  (make-algo-params :rsa-hashed-import (assoc opts :name "RSA-PSS")))
-
-(defmethod make-algo-params :rsa-oaep-hashed-import [type opts]
-  (make-algo-params :rsa-hashed-import (assoc opts :name "RSA-OAEP")))
-
 ;;; key
 
 (def key-usage
@@ -276,18 +84,18 @@
 
 ;;; impl
 
-(def digest-hash
+(def digest-algo
   {:sha256 "SHA-256"
    :sha384 "SHA-384"
    :sha512 "SHA-512"})
 
 (defn bytes->digest [data algo]
-  (digest data (digest-hash algo)))
+  (digest data (digest-algo algo)))
 
 (defn bytes->hmac [data key algo]
   (p/let [key (if-not (instance? js/ArrayBuffer key)
                 key
-                (import-key key (algo-params :hmac-import :hash (digest-hash algo)) :sign))]
+                (import-key key #js {"name" "HMAC" "hash" (digest-algo algo)} :sign))]
     (sign data key "HMAC")))
 
 (defn aead-key->bytes [key algo]
@@ -297,8 +105,8 @@
   (import-key
    data
    (case algo
-     :aes128gcm (algo-params :aes-gcm-key-gen :length 128)
-     :aes256gcm (algo-params :aes-gcm-key-gen :length 256))
+     :aes128gcm #js {"name" "AES-GCM" "length" 128}
+     :aes256gcm #js {"name" "AES-GCM" "length" 256})
    [:encrypt :decrypt :wrap-key :unwrap-key]
    :extractable true))
 
@@ -309,7 +117,9 @@
     (cryptfn
      data key
      (case algo
-       (:aes128gcm :aes256gcm) (algo-params :aes-gcm :iv iv :additional-data aad)))))
+       (:aes128gcm :aes256gcm) (if-not aad
+                                 #js {"name" "AES-GCM" "iv" iv}
+                                 #js {"name" "AES-GCM" "iv" iv "additionalData" aad})))))
 
 (def aead-encrypt (partial aead-crypt encrypt))
 (def aead-decrypt (partial aead-crypt decrypt))
@@ -319,47 +129,54 @@
    :p384 "P-384"
    :p521 "P-521"})
 
-(defn ecdh-generate-keypair [algo] (generate-keypair (algo-params :ecdh-key-gen :named-curve (ec-algo algo)) [:derive-bits :derive-key] :extractable true))
+(defn ecdh-generate-keypair [algo] (generate-keypair #js {"name" "ECDH" "namedCurve" (ec-algo algo)} [:derive-bits :derive-key] :extractable true))
 (defn ecdh-pub->bytes [pub] (export-key pub :format :spki))
 (defn ecdh-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->ecdh-pub [data algo] (import-key data (algo-params :ecdh-key-import :named-curve (ec-algo algo)) [] :format :spki))
-(defn bytes->ecdh-pri [data algo] (import-key data (algo-params :ecdh-key-import :named-curve (ec-algo algo)) [:derive-bits :derive-key] :format :pkcs8))
-(defn ecdh-key-exchange [pub pri] (derive-bits pri (algo-params :ecdh :public pub) 384))
+(defn bytes->ecdh-pub [data algo] (import-key data #js {"name" "ECDH" "namedCurve" (ec-algo algo)} [] :format :spki))
+(defn bytes->ecdh-pri [data algo] (import-key data #js {"name" "ECDH" "namedCurve" (ec-algo algo)} [:derive-bits :derive-key] :format :pkcs8))
+(defn ecdh-key-exchange [pub pri] (derive-bits pri #js {"name" "ECDH" "public" pub} 384))
 
-(defn ecdsa-generate-keypair [algo] (generate-keypair (algo-params :ecdsa-key-gen :named-curve (ec-algo algo)) [:sign :verify] :extractable true))
+(defn ecdsa-generate-keypair [algo] (generate-keypair #js {"name" "ECDSA" "namedCurve" (ec-algo algo)} [:sign :verify] :extractable true))
 (defn ecdsa-pub->bytes [pub] (export-key pub :format :spki))
 (defn ecdsa-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->ecdsa-pub [data algo] (import-key data (algo-params :ecdsa-key-import :named-curve (ec-algo algo)) [:sign :verify] :format :spki))
-(defn bytes->ecdsa-pri [data algo] (import-key data (algo-params :ecdsa-key-import :named-curve (ec-algo algo)) [:sign :verify] :format :pkcs8))
-(defn ecdsa-sign [data pri algo] (sign data pri (algo-params :ecdsa :hash (digest-hash algo))))
-(defn ecdsa-verify [data sig pub algo] (verify data sig pub (algo-params :ecdsa :hash (digest-hash algo))))
+(defn bytes->ecdsa-pub [data algo] (import-key data #js {"name" "ECDSA" "namedCurve" (ec-algo algo)} [:sign :verify] :format :spki))
+(defn bytes->ecdsa-pri [data algo] (import-key data #js {"name" "ECDSA" "namedCurve" (ec-algo algo)} [:sign :verify] :format :pkcs8))
+(defn ecdsa-sign [data pri algo] (sign data pri #js {"name" "ECDSA" "hash" (digest-algo algo)}))
+(defn ecdsa-verify [data sig pub algo] (verify data sig pub #js {"name" "ECDSA" "hash" (digest-algo algo)}))
 
-(defn x25519-generate-keypair [] (generate-keypair (algo-params :x25519-key-gen) [:derive-bits :derive-key] :extractable true))
+;; Impl notes: curve 25519/448 were standardized recently (2024.03),
+;; though they were been experimental for years.
+;;
+;; [https://github.com/w3c/webcrypto/pull/362]
+;; [https://github.com/w3c/webcrypto/issues/196]
+;; [https://wicg.github.io/webcrypto-secure-curves/]
+
+(defn x25519-generate-keypair [] (generate-keypair "X25519" [:derive-bits :derive-key] :extractable true))
 (defn x25519-pub->bytes [pub] (export-key pub :format :spki))
 (defn x25519-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->x25519-pub [data] (import-key data (algo-params :x25519-key-import) [] :format :spki))
-(defn bytes->x25519-pri [data] (import-key data (algo-params :x25519-key-import) [:derive-bits :derive-key] :format :pkcs8))
-(defn x25519-key-exchange [pub pri] (derive-bits pri (algo-params :x25519 :public pub) 256))
+(defn bytes->x25519-pub [data] (import-key data "X25519" [] :format :spki))
+(defn bytes->x25519-pri [data] (import-key data "X25519" [:derive-bits :derive-key] :format :pkcs8))
+(defn x25519-key-exchange [pub pri] (derive-bits pri #js {"name" "X25519" "public" pub} 256))
 
-(defn x448-generate-keypair [] (generate-keypair (algo-params :x448-key-gen) [:derive-bits :derive-key] :extractable true))
+(defn x448-generate-keypair [] (generate-keypair "X448" [:derive-bits :derive-key] :extractable true))
 (defn x448-pub->bytes [pub] (export-key pub :format :spki))
 (defn x448-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->x448-pub [data] (import-key data (algo-params :x448-key-import) [] :format :spki))
-(defn bytes->x448-pri [data] (import-key data (algo-params :x448-key-import) [:derive-bits :derive-key] :format :pkcs8))
-(defn x448-key-exchange [pub pri] (derive-bits pri (algo-params :x448 :public pub) 448))
+(defn bytes->x448-pub [data] (import-key data "X448" [] :format :spki))
+(defn bytes->x448-pri [data] (import-key data "X448" [:derive-bits :derive-key] :format :pkcs8))
+(defn x448-key-exchange [pub pri] (derive-bits pri #js {"name" "X448" "public" pub} 448))
 
-(defn ed25519-generate-keypair [] (generate-keypair (algo-params :ed25519-key-gen) [:sign :verify] :extractable true))
+(defn ed25519-generate-keypair [] (generate-keypair "Ed25519" [:sign :verify] :extractable true))
 (defn ed25519-pub->bytes [pub] (export-key pub :format :spki))
 (defn ed25519-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->ed25519-pub [data] (import-key data (algo-params :ed25519-key-import) [] :format :spki))
-(defn bytes->ed25519-pri [data] (import-key data (algo-params :ed25519-key-import) [:derive-bits :derive-key] :format :pkcs8))
-(defn ed25519-sign [data pri] (sign data pri (algo-params :ed25519)))
-(defn ed25519-verify [data sig pub] (verify data sig pub (algo-params :ed25519)))
+(defn bytes->ed25519-pub [data] (import-key data "Ed25519" [] :format :spki))
+(defn bytes->ed25519-pri [data] (import-key data "Ed25519" [:derive-bits :derive-key] :format :pkcs8))
+(defn ed25519-sign [data pri] (sign data pri "Ed25519"))
+(defn ed25519-verify [data sig pub] (verify data sig pub "Ed25519"))
 
-(defn ed448-generate-keypair [] (generate-keypair (algo-params :ed448-key-gen) [:sign :verify] :extractable true))
+(defn ed448-generate-keypair [] (generate-keypair "Ed448" [:sign :verify] :extractable true))
 (defn ed448-pub->bytes [pub] (export-key pub :format :spki))
 (defn ed448-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->ed448-pub [data] (import-key data (algo-params :ed448-key-import) [] :format :spki))
-(defn bytes->ed448-pri [data] (import-key data (algo-params :ed448-key-import) [:derive-bits :derive-key] :format :pkcs8))
-(defn ed448-sign [data pri] (sign data pri (algo-params :ed448)))
-(defn ed448-verify [data sig pub] (verify data sig pub (algo-params :ed448)))
+(defn bytes->ed448-pub [data] (import-key data "Ed448" [] :format :spki))
+(defn bytes->ed448-pri [data] (import-key data "Ed448" [:derive-bits :derive-key] :format :pkcs8))
+(defn ed448-sign [data pri] (sign data pri "Ed448"))
+(defn ed448-verify [data sig pub] (verify data sig pub "Ed448"))
