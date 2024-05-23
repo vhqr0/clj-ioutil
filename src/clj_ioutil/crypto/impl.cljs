@@ -2,157 +2,83 @@
   (:require [promesa.core :as p]
             [clj-ioutil.bytes :as b]))
 
-;;; key
-
-(def key-usage
-  {:encrypt "encrypt"
-   :decrypt "decrypt"
-   :sign "sign"
-   :verify "verify"
-   :derive-key "deriveKey"
-   :derive-bits "deriveBits"
-   :wrap-key "wrapKey"
-   :unwrap-key "unwrapKey"})
-
-(defn- key-usages [usage]
-  (if (keyword? usage)
-    (array (key-usage usage))
-    (to-array (map key-usage usage))))
-
-(def key-format
-  {:raw "raw"
-   :pkcs8 "pkcs8"
-   :spki "spki"
-   :jwk "jwk"})
-
-(defn generate-key [params usage & {:keys [extractable] :or {extractable false}}]
-  (js/crypto.subtle.generateKey
-   params extractable (key-usages usage)))
-
-(defn generate-keypair [& args]
-  (p/let [kp (apply generate-key args)]
-    [(.-privateKey kp) (.-publicKey kp)]))
-
-(defn export-key [key & {:keys [format] :or {format :raw}}]
-  (js/crypto.subtle.exportKey
-   (key-format format) key))
-
-(defn import-key
-  [data params usage & {:keys [extractable format] :or {extractable false format :raw}}]
-  (js/crypto.subtle.importKey
-   (key-format format) data
-   params extractable (key-usages usage)))
-
-(defn wrap-key [key wrap-params wrap-key & {:keys [format] :or {format :raw}}]
-  (js/crypto.subtle.wrapKey
-   (key-format format) key
-   wrap-key wrap-params))
-
-(defn unwrap-key
-  [data params usage wrap-params wrap-key
-   & {:keys [extractable format] :or {extractable false format :raw}}]
-  (js/crypto.subtle.unwrapKey
-   (key-format format) data
-   wrap-key wrap-params
-   params extractable (key-usages usage)))
-
-(defn derive-bits [key params length]
-  (js/crypto.subtle.deriveBits params key length))
-
-(defn derive-key [key params key-params usage & {:keys [extractable] :or {extractable false}}]
-  (js/crypto.subtle.deriveKey
-   params key
-   key-params extractable (key-usages usage)))
-
-;;; crypt
-
-;; hash: SHA-256, SHA-384, SHA-512
-(defn digest [data hash]
-  (js/crypto.subtle.digest hash data))
-
-(defn sign [data pri params]
-  (js/crypto.subtle.sign params pri data))
-
-(defn verify [data sig pub params]
-  (js/crypto.subtle.verify params pub sig data))
-
-(defn encrypt [data key params]
-  (js/crypto.subtle.encrypt params key data))
-
-(defn decrypt [data key params]
-  (js/crypto.subtle.decrypt params key data))
-
-;;; impl
-
 (def digest-algo
   {:sha256 "SHA-256"
    :sha384 "SHA-384"
    :sha512 "SHA-512"})
 
-(defn bytes->digest [data algo]
-  (digest data (digest-algo algo)))
+(defn digest [data algo]
+  (js/crypto.subtle.digest (digest-algo algo) data))
 
-(defn bytes->hmac [data key algo]
-  (p/let [key (if-not (instance? js/ArrayBuffer key)
-                key
-                (import-key key #js {"name" "HMAC" "hash" (digest-algo algo)} :sign))]
-    (sign data key "HMAC")))
+(defn hmac [data key algo]
+  (p/let [key (js/crypto.subtle.importKey
+               "raw" key
+               #js {"name" "HMAC" "hash" (digest-algo algo)} false #js ["sign"])]
+    (js/crypto.subtle.sign "HMAC" key data)))
 
-(def cipher-algo
-  {:aes128cbc #js {"name" "AES-CBC" "length" 128}
-   :aes192cbc #js {"name" "AES-CBC" "length" 192}
-   :aes256cbc #js {"name" "AES-CBC" "length" 256}
-   :aes128ctr #js {"name" "AES-CTR" "length" 128}
-   :aes192ctr #js {"name" "AES-CTR" "length" 192}
-   :aes256ctr #js {"name" "AES-CTR" "length" 256}
-   :aes128gcm #js {"name" "AES-GCM" "length" 128}
-   :aes192gcm #js {"name" "AES-GCM" "length" 192}
-   :aes256gcm #js {"name" "AES-GCM" "length" 256}})
+;; Impl notes: chacha20-poly1305 is not supported.
 
-(defn cipher-generate-key [algo]
-  (generate-key (cipher-algo algo) [:encrypt :decrypt :wrap-key :unwrap-key] :extractable true))
+(def cipher-key-params
+  {:aes128-cbc        #js {"name" "AES-CBC" "length" 128}
+   :aes192-cbc        #js {"name" "AES-CBC" "length" 192}
+   :aes256-cbc        #js {"name" "AES-CBC" "length" 256}
+   :aes128-ctr        #js {"name" "AES-CTR" "length" 128}
+   :aes192-ctr        #js {"name" "AES-CTR" "length" 192}
+   :aes256-ctr        #js {"name" "AES-CTR" "length" 256}
+   :aes128-gcm        #js {"name" "AES-GCM" "length" 128}
+   :aes192-gcm        #js {"name" "AES-GCM" "length" 192}
+   :aes256-gcm        #js {"name" "AES-GCM" "length" 256}
+   ;; :chacha20-poly1305 "ChaCha20-Poly1305"
+   })
 
-(defn cipher-key->bytes [key algo]
-  (export-key key))
+(def cipher-key-size
+  {:aes128-cbc        16
+   :aes192-cbc        24
+   :aes256-cbc        32
+   :aes128-ctr        16
+   :aes192-ctr        24
+   :aes256-ctr        32
+   :aes128-gcm        16
+   :aes192-gcm        24
+   :aes256-gcm        32
+   ;; :chacha20-poly1305 32
+   })
 
-(defn bytes->cipher-key [data algo]
-  (import-key data (cipher-algo algo) [:encrypt :decrypt :wrap-key :unwrap-key] :extractable true))
-
-(defn- cipher-crypt [cryptfn data key iv algo & {:keys [aad]}]
-  (p/let [key (if-not (instance? js/ArrayBuffer key)
-                key
-                (bytes->cipher-key key algo))]
-    (cryptfn
-     data key
-     (case algo
-       (:aes128cbc :aes192cbc :aes256cbc) #js {"name" "AES-CBC" "iv" iv}
-       (:aes128ctr :aes192ctr :aes256ctr) #js {"name" "AES-CTR" "counter" iv "length" 64}
-       (:aes128gcm :aes192gcm :aes256gcm) (if-not aad
+(defn cipher-params [algo iv aad]
+  (case algo
+    (:aes128-cbc :aes192-cbc :aes256-cbc) #js {"name" "AES-CBC" "iv" iv}
+    (:aes128-ctr :aes192-ctr :aes256-ctr) #js {"name" "AES-CTR" "counter" iv "length" 64}
+    (:aes128-gcm :aes192-gcm :aes256-gcm) (if-not aad
                                             #js {"name" "AES-GCM" "iv" iv}
-                                            #js {"name" "AES-GCM" "iv" iv "additionalData" aad})))))
+                                            #js {"name" "AES-GCM" "iv" iv "additionalData" aad})
+    ;; :chacha20-poly1305 (if-not aad
+    ;;                      #js {"name" "ChaCha20-Poly1305" "iv" iv}
+    ;;                      #js {"name" "ChaCha20-Poly1305" "iv" iv "additionalData" aad})
+    ))
 
-(def cipher-encrypt (partial cipher-crypt encrypt))
-(def cipher-decrypt (partial cipher-crypt decrypt))
+(defn generate-key [algo]
+  (js/crypto.subtle.generateKey
+   (cipher-key-params algo) true #js ["encrypt" "decrypt" "wrapKey" "unwrapKey"]))
 
-(def ec-algo
-  {:p256 "P-256"
-   :p384 "P-384"
-   :p521 "P-521"})
+(defn bytes->key [data algo]
+  (p/do
+    (assert (= (b/blength data)) (cipher-key-size algo))
+    (js/crypto.subtle.importKey
+     "raw" data
+     (cipher-key-params algo) true #js ["encrypt" "decrypt" "wrapKey" "unwrapKey"])))
 
-(defn ecdh-generate-keypair [algo] (generate-keypair #js {"name" "ECDH" "namedCurve" (ec-algo algo)} [:derive-bits :derive-key] :extractable true))
-(defn ecdh-pub->bytes [pub] (export-key pub :format :spki))
-(defn ecdh-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->ecdh-pub [data algo] (import-key data #js {"name" "ECDH" "namedCurve" (ec-algo algo)} [] :format :spki))
-(defn bytes->ecdh-pri [data algo] (import-key data #js {"name" "ECDH" "namedCurve" (ec-algo algo)} [:derive-bits :derive-key] :format :pkcs8))
-(defn ecdh-key-exchange [pub pri] (derive-bits pri #js {"name" "ECDH" "public" pub} 384))
+(defn key->bytes [key algo]
+  (p/let [data (js/crypto.subtle.exportKey "raw" key)]
+    (assert (= (b/blength data)) (cipher-key-size algo))
+    data))
 
-(defn ecdsa-generate-keypair [algo] (generate-keypair #js {"name" "ECDSA" "namedCurve" (ec-algo algo)} [:sign :verify] :extractable true))
-(defn ecdsa-pub->bytes [pub] (export-key pub :format :spki))
-(defn ecdsa-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->ecdsa-pub [data algo] (import-key data #js {"name" "ECDSA" "namedCurve" (ec-algo algo)} [:sign :verify] :format :spki))
-(defn bytes->ecdsa-pri [data algo] (import-key data #js {"name" "ECDSA" "namedCurve" (ec-algo algo)} [:sign :verify] :format :pkcs8))
-(defn ecdsa-sign [data pri algo] (sign data pri #js {"name" "ECDSA" "hash" (digest-algo algo)}))
-(defn ecdsa-verify [data sig pub algo] (verify data sig pub #js {"name" "ECDSA" "hash" (digest-algo algo)}))
+(defn encrypt [data key iv algo & {:keys [aad]}]
+  (p/let [key (if-not (instance? js/ArrayBuffer key) key (bytes->key key algo))]
+    (js/crypto.subtle.encrypt (cipher-params algo iv aad) key data)))
+
+(defn decrypt [data key iv algo & {:keys [aad]}]
+  (p/let [key (if-not (instance? js/ArrayBuffer key) key (bytes->key key algo))]
+    (js/crypto.subtle.decrypt (cipher-params algo iv aad) key data)))
 
 ;; Impl notes: curve 25519/448 were standardized recently (2024.03),
 ;; though they were been experimental for years.
@@ -161,32 +87,156 @@
 ;; [https://github.com/w3c/webcrypto/issues/196]
 ;; [https://wicg.github.io/webcrypto-secure-curves/]
 
-(defn x25519-generate-keypair [] (generate-keypair "X25519" [:derive-bits :derive-key] :extractable true))
-(defn x25519-pub->bytes [pub] (export-key pub :format :spki))
-(defn x25519-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->x25519-pub [data] (import-key data "X25519" [] :format :spki))
-(defn bytes->x25519-pri [data] (import-key data "X25519" [:derive-bits :derive-key] :format :pkcs8))
-(defn x25519-key-exchange [pub pri] (derive-bits pri #js {"name" "X25519" "public" pub} 256))
+(def no-usage #js [])
+(def ke-usage #js ["deriveBits" "deriveKey"])
+(def sign-usage #js ["sign" "verify"])
+(def verify-usage #js ["verify"])
 
-(defn x448-generate-keypair [] (generate-keypair "X448" [:derive-bits :derive-key] :extractable true))
-(defn x448-pub->bytes [pub] (export-key pub :format :spki))
-(defn x448-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->x448-pub [data] (import-key data "X448" [] :format :spki))
-(defn bytes->x448-pri [data] (import-key data "X448" [:derive-bits :derive-key] :format :pkcs8))
-(defn x448-key-exchange [pub pri] (derive-bits pri #js {"name" "X448" "public" pub} 448))
+(def pri-usage
+  {:ecdh-p256         ke-usage
+   :ecdh-p384         ke-usage
+   :ecdh-p521         ke-usage
+   :ecdsa-p256-sha256 sign-usage
+   :ecdsa-p256-sha384 sign-usage
+   :ecdsa-p256-sha512 sign-usage
+   :ecdsa-p384-sha256 sign-usage
+   :ecdsa-p384-sha384 sign-usage
+   :ecdsa-p384-sha512 sign-usage
+   :ecdsa-p521-sha256 sign-usage
+   :ecdsa-p521-sha384 sign-usage
+   :ecdsa-p521-sha512 sign-usage
+   :x25519            ke-usage
+   :x448              ke-usage
+   :ed25519           sign-usage
+   :ed448             sign-usage})
 
-(defn ed25519-generate-keypair [] (generate-keypair "Ed25519" [:sign :verify] :extractable true))
-(defn ed25519-pub->bytes [pub] (export-key pub :format :spki))
-(defn ed25519-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->ed25519-pub [data] (import-key data "Ed25519" [] :format :spki))
-(defn bytes->ed25519-pri [data] (import-key data "Ed25519" [:derive-bits :derive-key] :format :pkcs8))
-(defn ed25519-sign [data pri] (sign data pri "Ed25519"))
-(defn ed25519-verify [data sig pub] (verify data sig pub "Ed25519"))
+(def pub-usage
+  {:ecdh-p256         no-usage
+   :ecdh-p384         no-usage
+   :ecdh-p521         no-usage
+   :ecdsa-p256-sha256 verify-usage
+   :ecdsa-p256-sha384 verify-usage
+   :ecdsa-p256-sha512 verify-usage
+   :ecdsa-p384-sha256 verify-usage
+   :ecdsa-p384-sha384 verify-usage
+   :ecdsa-p384-sha512 verify-usage
+   :ecdsa-p521-sha256 verify-usage
+   :ecdsa-p521-sha384 verify-usage
+   :ecdsa-p521-sha512 verify-usage
+   :x25519            no-usage
+   :x448              no-usage
+   :ed25519           verify-usage
+   :ed448             verify-usage})
 
-(defn ed448-generate-keypair [] (generate-keypair "Ed448" [:sign :verify] :extractable true))
-(defn ed448-pub->bytes [pub] (export-key pub :format :spki))
-(defn ed448-pri->bytes [pri] (export-key pri :format :pkcs8))
-(defn bytes->ed448-pub [data] (import-key data "Ed448" [] :format :spki))
-(defn bytes->ed448-pri [data] (import-key data "Ed448" [:derive-bits :derive-key] :format :pkcs8))
-(defn ed448-sign [data pri] (sign data pri "Ed448"))
-(defn ed448-verify [data sig pub] (verify data sig pub "Ed448"))
+(def kp-params
+  {:ecdh-p256         #js {"name" "ECDH" "namedCurve" "P-256"}
+   :ecdh-p384         #js {"name" "ECDH" "namedCurve" "P-384"}
+   :ecdh-p521         #js {"name" "ECDH" "namedCurve" "P-521"}
+   :ecdsa-p256-sha256 #js {"name" "ECDSA" "namedCurve" "P-256"}
+   :ecdsa-p256-sha384 #js {"name" "ECDSA" "namedCurve" "P-256"}
+   :ecdsa-p256-sha512 #js {"name" "ECDSA" "namedCurve" "P-256"}
+   :ecdsa-p384-sha256 #js {"name" "ECDSA" "namedCurve" "P-384"}
+   :ecdsa-p384-sha384 #js {"name" "ECDSA" "namedCurve" "P-384"}
+   :ecdsa-p384-sha512 #js {"name" "ECDSA" "namedCurve" "P-384"}
+   :ecdsa-p521-sha256 #js {"name" "ECDSA" "namedCurve" "P-521"}
+   :ecdsa-p521-sha384 #js {"name" "ECDSA" "namedCurve" "P-521"}
+   :ecdsa-p521-sha512 #js {"name" "ECDSA" "namedCurve" "P-521"}
+   :x25519            "X25519"
+   :x448              "X448"
+   :ed25519           "Ed25519"
+   :ed448             "Ed448"})
+
+(def pri-format
+  {:ecdh-p256         "pkcs8"
+   :ecdh-p384         "pkcs8"
+   :ecdh-p521         "pkcs8"
+   :ecdsa-p256-sha256 "pkcs8"
+   :ecdsa-p256-sha384 "pkcs8"
+   :ecdsa-p256-sha512 "pkcs8"
+   :ecdsa-p384-sha256 "pkcs8"
+   :ecdsa-p384-sha384 "pkcs8"
+   :ecdsa-p384-sha512 "pkcs8"
+   :ecdsa-p521-sha256 "pkcs8"
+   :ecdsa-p521-sha384 "pkcs8"
+   :ecdsa-p521-sha512 "pkcs8"
+   :x25519            "pkcs8"
+   :x448              "pkcs8"
+   :ed25519           "pkcs8"
+   :ed448             "pkcs8"})
+
+(def pub-format
+  {:ecdh-p256         "spki"
+   :ecdh-p384         "spki"
+   :ecdh-p521         "spki"
+   :ecdsa-p256-sha256 "spki"
+   :ecdsa-p256-sha384 "spki"
+   :ecdsa-p256-sha512 "spki"
+   :ecdsa-p384-sha256 "spki"
+   :ecdsa-p384-sha384 "spki"
+   :ecdsa-p384-sha512 "spki"
+   :ecdsa-p521-sha256 "spki"
+   :ecdsa-p521-sha384 "spki"
+   :ecdsa-p521-sha512 "spki"
+   :x25519            "spki"
+   :x448              "spki"
+   :ed25519           "spki"
+   :ed448             "spki"})
+
+(defn ke-params [algo pub]
+  (case algo
+    (:ecdh-p256 :ecdh-p384 :ecdh-p521) #js {"name" "ECDH"   "public" pub}
+    :x25519                            #js {"name" "X25519" "public" pub}
+    :x448                              #js {"name" "X448"   "public" pub}))
+
+(def ke-key-size
+  {:ecdh-p256 48
+   :ecdh-p384 48
+   :ecdh-p521 48
+   :x25519    32
+   :x448      56})
+
+(def sign-params
+  {:ecdsa-p256-sha256 #js {"name" "ECDSA" "hash" "SHA-256"}
+   :ecdsa-p256-sha384 #js {"name" "ECDSA" "hash" "SHA-384"}
+   :ecdsa-p256-sha512 #js {"name" "ECDSA" "hash" "SHA-512"}
+   :ecdsa-p384-sha256 #js {"name" "ECDSA" "hash" "SHA-256"}
+   :ecdsa-p384-sha384 #js {"name" "ECDSA" "hash" "SHA-384"}
+   :ecdsa-p384-sha512 #js {"name" "ECDSA" "hash" "SHA-512"}
+   :ecdsa-p521-sha256 #js {"name" "ECDSA" "hash" "SHA-256"}
+   :ecdsa-p521-sha384 #js {"name" "ECDSA" "hash" "SHA-384"}
+   :ecdsa-p521-sha512 #js {"name" "ECDSA" "hash" "SHA-512"}
+   :ed25519           "Ed25519"
+   :ed448             "Ed448"})
+
+(defn generate-keypair [algo]
+  (p/let [kp (js/crypto.subtle.generateKey
+              (kp-params algo) true (pri-usage algo))]
+    [(.-privateKey kp) (.-publicKey kp)]))
+
+(defn bytes->pri [data algo]
+  (js/crypto.subtle.importKey
+   (pri-format algo) data
+   (kp-params algo) true (pri-usage algo)))
+
+(defn bytes->pub [data algo]
+  (js/crypto.subtle.importKey
+   (pub-format algo) data
+   (kp-params algo) true (pub-usage algo)))
+
+(defn pri->bytes [key algo]
+  (js/crypto.subtle.exportKey (pri-format algo) key))
+
+(defn pub->bytes [key algo]
+  (js/crypto.subtle.exportKey (pub-format algo) key))
+
+(defn key-exchange [pub pri algo & {:keys [size]}]
+  (js/crypto.subtle.deriveBits
+   (ke-params algo pub) pri (bit-shift-left (or size (ke-key-size algo)) 3)))
+
+(defn sign [data pri algo]
+  (js/crypto.subtle.sign
+   (sign-params algo) pri data))
+
+(defn verify [data sig pub algo]
+  (js/crypto.subtle.verify
+   (sign-params algo) pub sig data))
