@@ -7,7 +7,7 @@
             MessageDigest Signature]
            [java.security.spec
             EncodedKeySpec X509EncodedKeySpec PKCS8EncodedKeySpec
-            AlgorithmParameterSpec ECGenParameterSpec]
+            AlgorithmParameterSpec ECGenParameterSpec RSAKeyGenParameterSpec MGF1ParameterSpec PSSParameterSpec]
            [javax.crypto
             SecretKey KeyGenerator KeyAgreement Mac Cipher]
            [javax.crypto.spec
@@ -136,8 +136,15 @@
    :x25519            "X25519"
    :x448              "X448"
    :ed25519           "Ed25519"
-   :ed448             "Ed448"})
+   :ed448             "Ed448"
+   :rsa-pkcs1-sha256  "RSA"
+   :rsa-pkcs1-sha384  "RSA"
+   :rsa-pkcs1-sha512  "RSA"
+   :rsa-pss-sha256    "RSASSA-PSS"
+   :rsa-pss-sha384    "RSASSA-PSS"
+   :rsa-pss-sha512    "RSASSA-PSS"})
 
+(def rsa-65537 (RSAKeyGenParameterSpec. 4096 RSAKeyGenParameterSpec/F4))
 (def secp256r1 (ECGenParameterSpec. "SECP256R1"))
 (def secp384r1 (ECGenParameterSpec. "SECP384R1"))
 (def secp521r1 (ECGenParameterSpec. "SECP521R1"))
@@ -154,52 +161,13 @@
    :ecdsa-p384-sha512 secp384r1
    :ecdsa-p521-sha256 secp521r1
    :ecdsa-p521-sha384 secp521r1
-   :ecdsa-p521-sha512 secp521r1})
-
-(def key-spec
-  {:x509  X509EncodedKeySpec
-   :pkcs8 PKCS8EncodedKeySpec})
-
-(defn new-key-spec [data format]
-  (case format
-    :x509  (X509EncodedKeySpec. data)
-    :pkcs8 (PKCS8EncodedKeySpec. data)))
-
-(def pri-format
-  {:ecdh-p256         :pkcs8
-   :ecdh-p384         :pkcs8
-   :ecdh-p521         :pkcs8
-   :ecdsa-p256-sha256 :pkcs8
-   :ecdsa-p256-sha384 :pkcs8
-   :ecdsa-p256-sha512 :pkcs8
-   :ecdsa-p384-sha256 :pkcs8
-   :ecdsa-p384-sha384 :pkcs8
-   :ecdsa-p384-sha512 :pkcs8
-   :ecdsa-p521-sha256 :pkcs8
-   :ecdsa-p521-sha384 :pkcs8
-   :ecdsa-p521-sha512 :pkcs8
-   :x25519            :pkcs8
-   :x448              :pkcs8
-   :ed25519           :pkcs8
-   :ed448             :pkcs8})
-
-(def pub-format
-  {:ecdh-p256         :x509
-   :ecdh-p384         :x509
-   :ecdh-p521         :x509
-   :ecdsa-p256-sha256 :x509
-   :ecdsa-p256-sha384 :x509
-   :ecdsa-p256-sha512 :x509
-   :ecdsa-p384-sha256 :x509
-   :ecdsa-p384-sha384 :x509
-   :ecdsa-p384-sha512 :x509
-   :ecdsa-p521-sha256 :x509
-   :ecdsa-p521-sha384 :x509
-   :ecdsa-p521-sha512 :x509
-   :x25519            :x509
-   :x448              :x509
-   :ed25519           :x509
-   :ed448             :x509})
+   :ecdsa-p521-sha512 secp521r1
+   :rsa-pkcs1-sha256  rsa-65537
+   :rsa-pkcs1-sha384  rsa-65537
+   :rsa-pkcs1-sha512  rsa-65537
+   :rsa-pss-sha256    rsa-65537
+   :rsa-pss-sha384    rsa-65537
+   :rsa-pss-sha512    rsa-65537})
 
 (def ke-algo
   {:ecdh-p256 "ECDH"
@@ -219,7 +187,18 @@
    :ecdsa-p521-sha384 "SHA384withECDSA"
    :ecdsa-p521-sha512 "SHA512withECDSA"
    :ed25519           "Ed25519"
-   :ed448             "Ed448"})
+   :ed448             "Ed448"
+   :rsa-pkcs1-sha256  "SHA256withRSA"
+   :rsa-pkcs1-sha384  "SHA384withRSA"
+   :rsa-pkcs1-sha512  "SHA512withRSA"
+   :rsa-pss-sha256    "RSASSA-PSS"
+   :rsa-pss-sha384    "RSASSA-PSS"
+   :rsa-pss-sha512    "RSASSA-PSS"})
+
+(def sign-params
+  {:rsa-pss-sha256 (PSSParameterSpec. "SHA-256" "MGF1" (MGF1ParameterSpec. "SHA-256") 32 PSSParameterSpec/TRAILER_FIELD_BC)
+   :rsa-pss-sha384 (PSSParameterSpec. "SHA-384" "MGF1" (MGF1ParameterSpec. "SHA-384") 48 PSSParameterSpec/TRAILER_FIELD_BC)
+   :rsa-pss-sha512 (PSSParameterSpec. "SHA-512" "MGF1" (MGF1ParameterSpec. "SHA-512") 64 PSSParameterSpec/TRAILER_FIELD_BC)})
 
 (defn generate-keypair [algo]
   (p/vthread
@@ -236,25 +215,25 @@
 (defn bytes->pri [^bytes data algo]
   (p/vthread
    (let [^KeyFactory kf (KeyFactory/getInstance (kp-algo algo))
-         ^EncodedKeySpec ks (new-key-spec data (pri-format algo))]
+         ^EncodedKeySpec ks (PKCS8EncodedKeySpec. data)]
      (.generatePrivate kf ks))))
 
 (defn bytes->pub [^bytes data algo]
   (p/vthread
    (let [^KeyFactory kf (KeyFactory/getInstance (kp-algo algo))
-         ^EncodedKeySpec ks (new-key-spec data (pub-format algo))]
+         ^EncodedKeySpec ks (X509EncodedKeySpec. data)]
      (.generatePublic kf ks))))
 
 (defn pri->bytes [^PrivateKey key algo]
   (p/vthread
    (let [^KeyFactory kf (KeyFactory/getInstance (kp-algo algo))
-         ^EncodedKeySpec ks (.getKeySpec kf key (key-spec (pri-format algo)))]
+         ^EncodedKeySpec ks (.getKeySpec kf key PKCS8EncodedKeySpec)]
      (.getEncoded ks))))
 
 (defn pub->bytes [^PublicKey key algo]
   (p/vthread
    (let [^KeyFactory kf (KeyFactory/getInstance (kp-algo algo))
-         ^EncodedKeySpec ks (.getKeySpec kf key (key-spec (pub-format algo)))]
+         ^EncodedKeySpec ks (.getKeySpec kf key X509EncodedKeySpec)]
      (.getEncoded ks))))
 
 (defn key-exchange [^PublicKey pub ^PrivateKey pri algo & {:keys [size]}]
@@ -272,6 +251,8 @@
 (defn sign [^bytes data ^PrivateKey pri algo]
   (p/vthread
    (let [^Signature s (Signature/getInstance (sign-algo algo))]
+     (when-let [params (sign-params algo)]
+       (.setParameter s ^AlgorithmParameterSpec params))
      (.initSign s pri)
      (.update s data)
      (.sign s))))
@@ -279,6 +260,8 @@
 (defn verify [^bytes data ^bytes sig ^PublicKey pub algo]
   (p/vthread
    (let [^Signature s (Signature/getInstance (sign-algo algo))]
+     (when-let [params (sign-params algo)]
+       (.setParameter s ^AlgorithmParameterSpec params))
      (.initVerify s pub)
      (.update s data)
      (.verify s sig))))

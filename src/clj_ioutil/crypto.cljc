@@ -82,7 +82,13 @@
     :ecdsa-p521-sha384
     :ecdsa-p521-sha512
     :ed25519
-    :ed448})
+    :ed448
+    :rsa-pkcs1-sha256
+    :rsa-pkcs1-sha384
+    :rsa-pkcs1-sha512
+    :rsa-pss-sha256
+    :rsa-pss-sha384
+    :rsa-pss-sha512})
 
 (def pk-algos (set/union ke-algos sign-algos))
 
@@ -189,6 +195,8 @@
   (def a :ecdsa-p384-sha512)
   (def a :ecdsa-p521-sha384)
   (def a :ed448)
+  (def a :rsa-pkcs1-sha384)
+  (def a :rsa-pss-sha384)
   (do
     (def res (atom nil))
     (-> (p/let [kp (generate-keypair a)]

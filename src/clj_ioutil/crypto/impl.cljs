@@ -108,7 +108,13 @@
    :x25519            ke-usage
    :x448              ke-usage
    :ed25519           sign-usage
-   :ed448             sign-usage})
+   :ed448             sign-usage
+   :rsa-pkcs1-sha256  sign-usage
+   :rsa-pkcs1-sha384  sign-usage
+   :rsa-pkcs1-sha512  sign-usage
+   :rsa-pss-sha256    sign-usage
+   :rsa-pss-sha384    sign-usage
+   :rsa-pss-sha512    sign-usage})
 
 (def pub-usage
   {:ecdh-p256         no-usage
@@ -126,7 +132,15 @@
    :x25519            no-usage
    :x448              no-usage
    :ed25519           verify-usage
-   :ed448             verify-usage})
+   :ed448             verify-usage
+   :rsa-pkcs1-sha256  verify-usage
+   :rsa-pkcs1-sha384  verify-usage
+   :rsa-pkcs1-sha512  verify-usage
+   :rsa-pss-sha256    verify-usage
+   :rsa-pss-sha384    verify-usage
+   :rsa-pss-sha512    verify-usage})
+
+(def rsa-65537 (js/Uint8Array.from [1 0 1]))
 
 (def kp-params
   {:ecdh-p256         #js {"name" "ECDH" "namedCurve" "P-256"}
@@ -144,43 +158,13 @@
    :x25519            "X25519"
    :x448              "X448"
    :ed25519           "Ed25519"
-   :ed448             "Ed448"})
-
-(def pri-format
-  {:ecdh-p256         "pkcs8"
-   :ecdh-p384         "pkcs8"
-   :ecdh-p521         "pkcs8"
-   :ecdsa-p256-sha256 "pkcs8"
-   :ecdsa-p256-sha384 "pkcs8"
-   :ecdsa-p256-sha512 "pkcs8"
-   :ecdsa-p384-sha256 "pkcs8"
-   :ecdsa-p384-sha384 "pkcs8"
-   :ecdsa-p384-sha512 "pkcs8"
-   :ecdsa-p521-sha256 "pkcs8"
-   :ecdsa-p521-sha384 "pkcs8"
-   :ecdsa-p521-sha512 "pkcs8"
-   :x25519            "pkcs8"
-   :x448              "pkcs8"
-   :ed25519           "pkcs8"
-   :ed448             "pkcs8"})
-
-(def pub-format
-  {:ecdh-p256         "spki"
-   :ecdh-p384         "spki"
-   :ecdh-p521         "spki"
-   :ecdsa-p256-sha256 "spki"
-   :ecdsa-p256-sha384 "spki"
-   :ecdsa-p256-sha512 "spki"
-   :ecdsa-p384-sha256 "spki"
-   :ecdsa-p384-sha384 "spki"
-   :ecdsa-p384-sha512 "spki"
-   :ecdsa-p521-sha256 "spki"
-   :ecdsa-p521-sha384 "spki"
-   :ecdsa-p521-sha512 "spki"
-   :x25519            "spki"
-   :x448              "spki"
-   :ed25519           "spki"
-   :ed448             "spki"})
+   :ed448             "Ed448"
+   :rsa-pkcs1-sha256  #js {"name" "RSASSA-PKCS1-v1_5" "hash" "SHA-256" "modulusLength" 4096 "publicExponent" rsa-65537}
+   :rsa-pkcs1-sha384  #js {"name" "RSASSA-PKCS1-v1_5" "hash" "SHA-384" "modulusLength" 4096 "publicExponent" rsa-65537}
+   :rsa-pkcs1-sha512  #js {"name" "RSASSA-PKCS1-v1_5" "hash" "SHA-512" "modulusLength" 4096 "publicExponent" rsa-65537}
+   :rsa-pss-sha256    #js {"name" "RSA-PSS"           "hash" "SHA-256" "modulusLength" 4096 "publicExponent" rsa-65537}
+   :rsa-pss-sha384    #js {"name" "RSA-PSS"           "hash" "SHA-384" "modulusLength" 4096 "publicExponent" rsa-65537}
+   :rsa-pss-sha512    #js {"name" "RSA-PSS"           "hash" "SHA-512" "modulusLength" 4096 "publicExponent" rsa-65537}})
 
 (defn ke-params [algo pub]
   (case algo
@@ -206,7 +190,13 @@
    :ecdsa-p521-sha384 #js {"name" "ECDSA" "hash" "SHA-384"}
    :ecdsa-p521-sha512 #js {"name" "ECDSA" "hash" "SHA-512"}
    :ed25519           "Ed25519"
-   :ed448             "Ed448"})
+   :ed448             "Ed448"
+   :rsa-pkcs1-sha256  #js {"name" "RSASSA-PKCS1-v1_5" "saltLength" 32}
+   :rsa-pkcs1-sha384  #js {"name" "RSASSA-PKCS1-v1_5" "saltLength" 48}
+   :rsa-pkcs1-sha512  #js {"name" "RSASSA-PKCS1-v1_5" "saltLength" 64}
+   :rsa-pss-sha256    #js {"name" "RSA-PSS" "saltLength" 32}
+   :rsa-pss-sha384    #js {"name" "RSA-PSS" "saltLength" 48}
+   :rsa-pss-sha512    #js {"name" "RSA-PSS" "saltLength" 64}})
 
 (defn generate-keypair [algo]
   (p/let [kp (js/crypto.subtle.generateKey
@@ -215,19 +205,19 @@
 
 (defn bytes->pri [data algo]
   (js/crypto.subtle.importKey
-   (pri-format algo) data
+   "pkcs8" data
    (kp-params algo) true (pri-usage algo)))
 
 (defn bytes->pub [data algo]
   (js/crypto.subtle.importKey
-   (pub-format algo) data
+   "spki" data
    (kp-params algo) true (pub-usage algo)))
 
 (defn pri->bytes [key algo]
-  (js/crypto.subtle.exportKey (pri-format algo) key))
+  (js/crypto.subtle.exportKey "pkcs8" key))
 
 (defn pub->bytes [key algo]
-  (js/crypto.subtle.exportKey (pub-format algo) key))
+  (js/crypto.subtle.exportKey "spki" key))
 
 (defn key-exchange [pub pri algo & {:keys [size]}]
   (js/crypto.subtle.deriveBits
