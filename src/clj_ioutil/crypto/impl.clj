@@ -112,7 +112,9 @@
          ^SecretKey key (if-not (bytes? key) key (SecretKeySpec. key (cipher-key-algo algo)))]
      (.init c ^int (cipher-mode mode) key ^AlgorithmParameterSpec (cipher-params algo iv))
      (when aad
-       (.updateAAD c aad))
+       (if-not (instance? ByteBuffer aad)
+         (.updateAAD c ^bytes aad)
+         (.updateAAD c ^ByteBuffer aad)))
      (.doFinal c data))))
 
 (def encrypt (partial crypt :encrypt))
