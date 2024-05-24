@@ -2,7 +2,7 @@
   (:require [clojure.string :as str]
             [promesa.core :as p]
             [promesa.exec :as pe]
-            [clj-ioutil.clj.streams :as s]
+            [clj-ioutil.bytes.clj.streams :as s]
             [clj-ioutil.http.util :as u]
             [clj-ioutil.http.protocol :as pt])
   (:import java.util.Arrays

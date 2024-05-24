@@ -1,4 +1,4 @@
-(ns clj-ioutil.struct
+(ns clj-ioutil.bytes.struct
   (:require [promesa.core :as p]
             [clj-ioutil.bytes :as b]
             [clj-ioutil.bytes.util :as u]))

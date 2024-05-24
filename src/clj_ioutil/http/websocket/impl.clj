@@ -1,6 +1,6 @@
 (ns clj-ioutil.http.websocket.impl
   (:require [clj-ioutil.bytes :as b]
-            [clj-ioutil.clj.streams :as s]
+            [clj-ioutil.bytes.clj.streams :as s]
             [clj-ioutil.http.protocol :as pt]
             [clj-ioutil.http.client :as cli]
             [clj-ioutil.http.client.impl :as cli-impl])

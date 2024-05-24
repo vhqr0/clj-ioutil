@@ -1,4 +1,4 @@
-(ns clj-ioutil.cljs.streams
+(ns clj-ioutil.bytes.cljs.streams
   (:require [promesa.core :as p]
             [promesa.exec.csp :as csp]
             [clj-ioutil.bytes :as b]))

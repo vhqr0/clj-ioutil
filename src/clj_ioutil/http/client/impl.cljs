@@ -1,7 +1,7 @@
 (ns clj-ioutil.http.client.impl
   (:require [clojure.string :as str]
             [promesa.core :as p]
-            [clj-ioutil.cljs.streams :as s]
+            [clj-ioutil.bytes.cljs.streams :as s]
             [clj-ioutil.http.util :as u]
             [clj-ioutil.http.protocol :as pt]))
 

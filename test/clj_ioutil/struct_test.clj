@@ -1,7 +1,7 @@
 (ns clj-ioutil.struct-test
   (:require [clojure.test :refer :all]
             [clj-ioutil.bytes :as b]
-            [clj-ioutil.struct :as st]))
+            [clj-ioutil.bytes.struct :as st]))
 
 (deftest struct-test
   (testing "bytes"
