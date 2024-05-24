@@ -28,7 +28,7 @@
 
 ;;; getter as uint8
 
-(defn- byte->uint [i] (bit-and 0xff (byte i)))
+(defn byte->uint [i] (bit-and 0xff (byte i)))
 (defn bget-unsigned [b i] (byte->uint (aget (bytes b) i)))
 (defn bseq-unsigned [b] (map byte->uint (bseq b)))
 (defn brseq-unsigned [b] (map byte->uint (brseq b)))
@@ -127,34 +127,30 @@
 (defn hex->bytes
   [^String s] (.parseHex (HexFormat/of) s))
 
-(defn- make-base64-encoder [alphabet]
-  (if (instance? Base64$Encoder alphabet)
-    alphabet
-    (case alphabet
-      :default (Base64/getEncoder)
-      :urlsafe (Base64/getUrlEncoder)
-      :mime    (Base64/getMimeEncoder))))
+(defn base64-encoder [alphabet]
+  (case alphabet
+    :default (Base64/getEncoder)
+    :urlsafe (Base64/getUrlEncoder)
+    :mime    (Base64/getMimeEncoder)))
 
-(defn- make-base64-decoder [alphabet]
-  (if (instance? Base64$Decoder alphabet)
-    alphabet
-    (case alphabet
-      :default (Base64/getDecoder)
-      :urlsafe (Base64/getUrlDecoder)
-      :mime    (Base64/getMimeDecoder))))
+(defn base64-decoder [alphabet]
+  (case alphabet
+    :default (Base64/getDecoder)
+    :urlsafe (Base64/getUrlDecoder)
+    :mime    (Base64/getMimeDecoder)))
 
 (defn bytes->base64
   ([^bytes b]
    (bytes->base64 b :default))
   ([^bytes b alphabet]
-   (let [^Base64$Encoder encoder (make-base64-encoder alphabet)]
+   (let [^Base64$Encoder encoder (base64-encoder alphabet)]
      (String. (.encode encoder b)))))
 
 (defn base64->bytes
   ([^String s]
    (base64->bytes s :default))
   ([^String s alphabet]
-   (let [^Base64$Decoder decoder (make-base64-decoder alphabet)]
+   (let [^Base64$Decoder decoder (base64-decoder alphabet)]
      (.decode decoder s))))
 
 ;;; str utils

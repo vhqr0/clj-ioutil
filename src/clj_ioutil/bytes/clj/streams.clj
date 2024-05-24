@@ -175,8 +175,8 @@
        (.connect sock addr (int-time timeout)))
      (if-not ssl
        sock
-       (let [^SSLSocketFactory f (SSLSocketFactory/getDefault)]
-         (.createSocket f sock (.getHostName addr) (.getPort addr) true))))))
+       (let [^SSLSocketFactory ssf (SSLSocketFactory/getDefault)]
+         (.createSocket ssf sock (.getHostName addr) (.getPort addr) true))))))
 
 (defn socket->stream [^Socket sock]
   (let [is (.getInputStream sock)

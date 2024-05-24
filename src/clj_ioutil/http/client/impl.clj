@@ -47,10 +47,8 @@
 (defn ^CookieHandler cookie-manager
   ([]
    (CookieManager.))
-  ([store & {:keys [policy] :or {policy :accept-all}}]
-   (let [^CookieStore store (if-not (instance? CookieManager store)
-                              store
-                              (.getCookieStore ^CookieManager store))]
+  ([^CookieManager base policy]
+   (let [^CookieStore store (.getCookieStore base)]
      (CookieManager. store (cookie-policy policy)))))
 
 ;;; client
