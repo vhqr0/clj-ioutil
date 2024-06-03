@@ -8,7 +8,7 @@
            java.time.Duration
            [java.io InputStream OutputStream]
            [java.net SocketAddress InetAddress InetSocketAddress Proxy Proxy$Type Socket]
-           javax.net.ssl.SSLSocketFactory))
+           [javax.net.ssl SSLContext SSLSocketFactory]))
 
 (defn ^Duration duration-time [time]
   (if (instance? Duration time)
@@ -175,7 +175,9 @@
        (.connect sock addr (int-time timeout)))
      (if-not ssl
        sock
-       (let [^SSLSocketFactory ssf (SSLSocketFactory/getDefault)]
+       (let [^SSLSocketFactory ssf (if-not (instance? SSLContext ssl)
+                                     (SSLSocketFactory/getDefault)
+                                     (.getSocketFactory ^SSLContext ssl))]
          (.createSocket ssf sock (.getHostName addr) (.getPort addr) true))))))
 
 (defn socket->stream [^Socket sock]

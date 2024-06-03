@@ -89,6 +89,9 @@
 (defn- cb-set-cookie [^HttpClient$Builder builder cookie]
   (.cookieHandler builder cookie))
 
+(defn- cb-set-ssl [^HttpClient$Builder builder ssl]
+  (.sslContext builder ssl))
+
 (defn- cb-set-version [^HttpClient$Builder builder version]
   (.version builder (http-version version)))
 
@@ -102,12 +105,13 @@
   (.build builder))
 
 (defn ^HttpClient make-client
-  [{:keys [executor proxy auth cookie version timeout redirect]}]
+  [{:keys [executor proxy auth cookie ssl version timeout redirect]}]
   (-> (cond-> (HttpClient/newBuilder)
         executor (cb-set-executor executor)
         proxy    (cb-set-proxy proxy)
         auth     (cb-set-auth auth)
         cookie   (cb-set-cookie cookie)
+        ssl      (cb-set-ssl ssl)
         version  (cb-set-version version)
         timeout  (cb-set-timeout timeout)
         redirect (cb-set-redirect redirect))
